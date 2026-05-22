@@ -96,8 +96,8 @@ def get_users():
 def delete_user(nie):
 
     cur.execute("""
-    DELETE FROM users
-    WHERE nie=?
+        DELETE FROM users
+        WHERE nie=?
     """, (nie,))
 
-    conn             "
+    conn.commit()
