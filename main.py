@@ -2,9 +2,10 @@ import asyncio
 import aiohttp
 from playwright.async_api import async_playwright
 
-TOKEN = "PUT_YOUR_BOT_TOKEN"
+TOKEN = "8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps"
 ADMIN_ID = 6675176280
-TG_URL = f"https://api.telegram.org/bot{TOKEN}"
+
+BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 running = False
 
@@ -19,17 +20,17 @@ class Telegram:
             self.session = aiohttp.ClientSession()
 
     async def send(self, msg):
-
         await self.init()
+
         msg = str(msg)
 
-        # 🔥 FIX: Telegram limit
+        # 🔥 حل مشكلة طول الرسالة
         if len(msg) > 3500:
             msg = msg[:3500] + "\n...\n⚠️ TRUNCATED"
 
         try:
             async with self.session.post(
-                f"{TG_URL}/sendMessage",
+                f"{BASE_URL}/sendMessage",
                 data={
                     "chat_id": ADMIN_ID,
                     "text": msg
@@ -41,10 +42,9 @@ class Telegram:
 
 tg = Telegram()
 
-# ================= PLAYWRIGHT WORKER =================
+# ================= WORKER =================
 
 async def worker():
-
     global running
 
     print("🚀 WORKER STARTED")
@@ -68,7 +68,7 @@ async def worker():
             while running:
 
                 try:
-                    print("🔁 ALIVE CHECK")
+                    print("🔁 ALIVE")
                     await asyncio.sleep(5)
 
                 except Exception as e:
@@ -80,7 +80,6 @@ async def worker():
 # ================= COMMAND HANDLER =================
 
 async def handle(text):
-
     global running
 
     print("CMD:", text)
@@ -101,7 +100,7 @@ async def handle(text):
         running = False
         await tg.send("⛔ Bot stopped")
 
-# ================= TELEGRAM POLLING =================
+# ================= TELEGRAM LOOP =================
 
 async def main():
 
@@ -116,7 +115,7 @@ async def main():
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.get(
-                    f"{TG_URL}/getUpdates?offset={offset}"
+                    f"{BASE_URL}/getUpdates?offset={offset}"
                 ) as r:
 
                     data = await r.json()
