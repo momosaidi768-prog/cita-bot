@@ -9,10 +9,6 @@ from playwright.async_api import async_playwright
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-if not TOKEN:
-    print("BOT_TOKEN missing")
-    exit()
-
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
 URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
@@ -20,6 +16,12 @@ URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
 CITIES = ["MADRID", "BARCELONA", "TOLEDO", "ALICANTE", "SEVILLA"]
 
 SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
+
+# ================= GLOBAL STATE =================
+
+started = False
+processed_updates = set()
+user_state = {}
 
 # ================= TELEGRAM =================
 
@@ -80,25 +82,26 @@ def clear_users():
     cur.execute("DELETE FROM users")
     conn.commit()
 
-# ================= STATE =================
-
-user_state = {}
-
 # ================= HANDLE =================
 
 async def handle(text, chat_id):
 
-    if text == "/start":
+    global user_state
+
+    # START
+    if text == "/start" and chat_id not in user_state:
         user_state[chat_id] = {"step": "name"}
         await tg.send("👤 اكتب الاسم ديالك:")
         return
 
+    # RESET
     if text == "/reset":
         clear_users()
         user_state.clear()
         await tg.send("🗑 Database cleared")
         return
 
+    # if user not in flow
     if chat_id not in user_state:
         return
 
@@ -188,41 +191,64 @@ async def worker():
 
 async def loop():
 
+    global processed_updates
+
     offset = 0
 
     while True:
 
-        async with aiohttp.ClientSession() as s:
-            async with s.get(
-                f"https://api.telegram.org/bot{TOKEN}/getUpdates",
-                params={"offset": offset}
-            ) as r:
-                data = await r.json()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    f"https://api.telegram.org/bot{TOKEN}/getUpdates",
+                    params={"offset": offset}
+                ) as r:
+                    data = await r.json()
 
-        for upd in data.get("result", []):
+            for upd in data.get("result", []):
 
-            offset = upd["update_id"] + 1
+                update_id = upd["update_id"]
 
-            if "message" in upd:
-                chat_id = upd["message"]["chat"]["id"]
-                text = upd["message"].get("text", "")
+                if update_id in processed_updates:
+                    continue
 
-                if chat_id == ADMIN_ID:
-                    await handle(text, chat_id)
+                processed_updates.add(update_id)
+
+                offset = update_id + 1
+
+                if "message" in upd:
+                    chat_id = upd["message"]["chat"]["id"]
+                    text = upd["message"].get("text", "")
+
+                    if chat_id == ADMIN_ID:
+                        await handle(text, chat_id)
+
+        except Exception as e:
+            print("LOOP ERROR:", e)
 
         await asyncio.sleep(2)
 
 # ================= MAIN =================
 
 async def main():
+
+    global started
+
     await tg.init()
-    await tg.send("🚀 Bot started successfully")
+
+    if not started:
+        await tg.send("🚀 Bot started successfully")
+        started = True
 
     await asyncio.gather(loop(), worker())
 
+# ================= START =================
+
 if __name__ == "__main__":
+
     try:
         asyncio.run(main())
+
     finally:
         try:
             asyncio.run(tg.close())
