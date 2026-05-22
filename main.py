@@ -9,11 +9,15 @@ from playwright.async_api import async_playwright
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
+if not TOKEN:
+    print("BOT_TOKEN missing")
+    exit()
+
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
 URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
 
-CITIES = ["MADRID","BARCELONA","TOLEDO","ALICANTE","SEVILLA"]
+CITIES = ["MADRID", "BARCELONA", "TOLEDO", "ALICANTE", "SEVILLA"]
 
 SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 
@@ -30,11 +34,14 @@ class Telegram:
         if not self.session:
             await self.init()
 
-        async with self.session.post(
-            TG_URL,
-            data={"chat_id": ADMIN_ID, "text": msg}
-        ) as r:
-            await r.text()
+        try:
+            async with self.session.post(
+                TG_URL,
+                data={"chat_id": ADMIN_ID, "text": msg}
+            ) as r:
+                await r.text()
+        except Exception as e:
+            print("Telegram error:", e)
 
     async def close(self):
         if self.session:
@@ -77,7 +84,7 @@ def clear_users():
 
 user_state = {}
 
-# ================= FORM HANDLER =================
+# ================= HANDLE =================
 
 async def handle(text, chat_id):
 
@@ -105,7 +112,7 @@ async def handle(text, chat_id):
     elif step == "nie":
         user_state[chat_id]["nie"] = text
         user_state[chat_id]["step"] = "phone"
-        await tg.send("📞 اكتب رقم الهاتف:")
+        await tg.send("📞 اكتب الهاتف:")
 
     elif step == "phone":
         user_state[chat_id]["phone"] = text
@@ -119,14 +126,12 @@ async def handle(text, chat_id):
         add_user(u["name"], u["nie"], u["phone"], text)
 
         await tg.send(
-            f"""✅ USER SAVED
-
-👤 {u['name']}
-📄 {u['nie']}
-📞 {u['phone']}
-📧 {text}
-
-🤖 Monitoring started..."""
+            "✅ USER SAVED\n\n"
+            f"👤 {u['name']}\n"
+            f"📄 {u['nie']}\n"
+            f"📞 {u['phone']}\n"
+            f"📧 {text}\n\n"
+            "🤖 Monitoring started..."
         )
 
         del user_state[chat_id]
@@ -139,7 +144,7 @@ async def worker():
 
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox","--disable-setuid-sandbox"]
+            args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
 
         page = await browser.new_page()
@@ -199,4 +204,27 @@ async def loop():
             offset = upd["update_id"] + 1
 
             if "message" in upd:
-                chat_id = upd["message"]["
+                chat_id = upd["message"]["chat"]["id"]
+                text = upd["message"].get("text", "")
+
+                if chat_id == ADMIN_ID:
+                    await handle(text, chat_id)
+
+        await asyncio.sleep(2)
+
+# ================= MAIN =================
+
+async def main():
+    await tg.init()
+    await tg.send("🚀 Bot started successfully")
+
+    await asyncio.gather(loop(), worker())
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    finally:
+        try:
+            asyncio.run(tg.close())
+        except:
+            pass
