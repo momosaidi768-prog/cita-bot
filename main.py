@@ -1,26 +1,14 @@
-import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# قراءة التوكن من Railway Variables
-TOKEN = os.getenv("BOT_TOKEN")
-
-# فحص التوكن
-print("TOKEN:", repr(TOKEN))
-
-if not TOKEN:
-    raise ValueError("BOT_TOKEN غير موجود في Railway Variables!")
+TOKEN = "8202293986:AAHL6nkd54h-D4_CTid6P9IQYcjj3nYQ9n8"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("البوت خدام ✅")
 
-# إنشاء البوت
-app = ApplicationBuilder().token(TOKEN.strip()).build()
+app = ApplicationBuilder().token(TOKEN).build()
 
-# الأوامر
 app.add_handler(CommandHandler("start", start))
 
 print("Bot started...")
-
-# تشغيل البوت
 app.run_polling()
