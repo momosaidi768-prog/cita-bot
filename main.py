@@ -1,11 +1,11 @@
- import asyncio
+  import asyncio
 import sqlite3
 import aiohttp
 from playwright.async_api import async_playwright
 
 # ================= CONFIG =================
 
-TOKEN = "PUT_YOUR_BOT_TOKEN"
+TOKEN = "8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps"
 ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
@@ -104,11 +104,21 @@ async def check(page, city):
         if count < 2:
             return None
 
-        await selects.nth(0).select_option(label=city)
+        # city select
+        try:
+            await selects.nth(0).select_option(label=city)
+        except:
+            return None
+
         await page.click("input[type='submit']")
         await page.wait_for_load_state("domcontentloaded")
 
-        await selects.nth(0).select_option(label=SERVICE)
+        # service select
+        try:
+            await selects.nth(0).select_option(label=SERVICE)
+        except:
+            return None
+
         await page.click("input[type='submit']")
         await page.wait_for_load_state("domcontentloaded")
 
@@ -163,18 +173,22 @@ async def worker():
                         result = await check(page, city)
 
                         if result:
+                            try:
+                                await page.screenshot(path="shot.png")
 
-                            await page.screenshot(path="shot.png")
-
-                            await tg.send(
-                                f"🔥 FOUND\n{name}\n{nie}\n{city}\n{result}"
-                            )
+                                await tg.send(
+                                    f"🔥 FOUND\n{name}\n{nie}\n{city}\n{result}"
+                                )
+                            except:
+                                pass
 
                             await asyncio.sleep(30)
 
                         await asyncio.sleep(2)
 
                 await asyncio.sleep(5)
+
+            await browser.close()
 
     except Exception as e:
         await tg.send(f"❌ Worker crashed: {str(e)[:500]}")
