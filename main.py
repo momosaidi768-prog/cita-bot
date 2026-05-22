@@ -1,4 +1,4 @@
-  import asyncio
+import asyncio
 import sqlite3
 import aiohttp
 from playwright.async_api import async_playwright
