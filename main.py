@@ -1,40 +1,43 @@
-import asyncio
 import os
-from playwright.async_api import async_playwright
+import aiohttp
+import asyncio
 
-URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = os.getenv("ADMIN_ID")
 
-async def run():
+TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
-    async with async_playwright() as p:
+async def send(msg):
+    async with aiohttp.ClientSession() as s:
+        await s.post(TG_URL, data={
+            "chat_id": ADMIN_ID,
+            "text": msg
+        })
 
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu"
-            ]
-        )
+async def main():
+    await send("🤖 Test bot is running!")
 
-        context = await browser.new_context()
-        page = await context.new_page()
+    offset = None
 
+    while True:
         try:
-            await page.goto(URL, timeout=60000)
-            await page.wait_for_load_state("domcontentloaded")
+            async with aiohttp.ClientSession() as s:
+                url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+                async with s.get(url, params={"offset": offset}) as r:
+                    data = await r.json()
 
-            print("Page loaded successfully")
+            for upd in data.get("result", []):
+                offset = upd["update_id"] + 1
 
-            # test simple
-            title = await page.title()
-            print("TITLE:", title)
+                if "message" in upd:
+                    text = upd["message"]["text"]
+
+                    await send(f"📩 Echo: {text}")
 
         except Exception as e:
-            print("ERROR:", e)
+            print("error:", e)
 
-        await browser.close()
-
+        await asyncio.sleep(2)
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(main())
