@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 from playwright.async_api import async_playwright
 
-TOKEN = "PUT_YOUR_BOT_TOKEN"
+TOKEN = "8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps"
 ADMIN_ID = 6675176280
 
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
