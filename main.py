@@ -13,13 +13,13 @@ TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
 URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
 
-CITIES = ["MADRID", "BARCELONA", "TOLEDO", "ALICANTE", "SEVILLA"]
+CITIES = ["MADRID", "BARCELONA", "SEVILLA", "VALENCIA"]
 
 SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 
-# ================= GLOBAL STATE =================
+# ================= GLOBAL FIX (ANTI DUPLICATE) =================
 
-started = False
+LOCK_FILE = "started.lock"
 processed_updates = set()
 user_state = {}
 
@@ -36,14 +36,11 @@ class Telegram:
         if not self.session:
             await self.init()
 
-        try:
-            async with self.session.post(
-                TG_URL,
-                data={"chat_id": ADMIN_ID, "text": msg}
-            ) as r:
-                await r.text()
-        except Exception as e:
-            print("Telegram error:", e)
+        async with self.session.post(
+            TG_URL,
+            data={"chat_id": ADMIN_ID, "text": msg}
+        ) as r:
+            await r.text()
 
     async def close(self):
         if self.session:
@@ -82,26 +79,33 @@ def clear_users():
     cur.execute("DELETE FROM users")
     conn.commit()
 
+# ================= START ONLY ONCE =================
+
+async def send_startup_once():
+    if os.path.exists(LOCK_FILE):
+        return
+
+    with open(LOCK_FILE, "w") as f:
+        f.write("started")
+
+    await tg.send("🚀 Bot started successfully")
+
 # ================= HANDLE =================
 
 async def handle(text, chat_id):
 
-    global user_state
-
-    # START
-    if text == "/start" and chat_id not in user_state:
-        user_state[chat_id] = {"step": "name"}
-        await tg.send("👤 اكتب الاسم ديالك:")
+    if text == "/start":
+        if chat_id not in user_state:
+            user_state[chat_id] = {"step": "name"}
+            await tg.send("👤 اكتب الاسم ديالك:")
         return
 
-    # RESET
     if text == "/reset":
         clear_users()
         user_state.clear()
         await tg.send("🗑 Database cleared")
         return
 
-    # if user not in flow
     if chat_id not in user_state:
         return
 
@@ -139,7 +143,7 @@ async def handle(text, chat_id):
 
         del user_state[chat_id]
 
-# ================= PLAYWRIGHT =================
+# ================= PLAYWRIGHT WORKER =================
 
 async def worker():
 
@@ -151,8 +155,6 @@ async def worker():
         )
 
         page = await browser.new_page()
-
-        await tg.send("🤖 Playwright bot started on Railway")
 
         while True:
 
@@ -187,7 +189,7 @@ async def worker():
 
             await asyncio.sleep(10)
 
-# ================= TELEGRAM LOOP =================
+# ================= TELEGRAM LOOP (ANTI DUPLICATE FIX) =================
 
 async def loop():
 
@@ -207,14 +209,13 @@ async def loop():
 
             for upd in data.get("result", []):
 
-                update_id = upd["update_id"]
+                uid = upd["update_id"]
 
-                if update_id in processed_updates:
+                if uid in processed_updates:
                     continue
 
-                processed_updates.add(update_id)
-
-                offset = update_id + 1
+                processed_updates.add(uid)
+                offset = uid + 1
 
                 if "message" in upd:
                     chat_id = upd["message"]["chat"]["id"]
@@ -232,15 +233,14 @@ async def loop():
 
 async def main():
 
-    global started
-
     await tg.init()
 
-    if not started:
-        await tg.send("🚀 Bot started successfully")
-        started = True
+    await send_startup_once()
 
-    await asyncio.gather(loop(), worker())
+    await asyncio.gather(
+        loop(),
+        worker()
+    )
 
 # ================= START =================
 
