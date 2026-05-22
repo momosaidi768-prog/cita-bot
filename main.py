@@ -8,8 +8,19 @@ from playwright.async_api import async_playwright
 
 import os
 
-TOKEN = os.getenv("8202293986:AAHL6nkd54h-D4_CTid6P9IQYcjj3nYQ9n8")
-ADMIN_ID = 6675176280
+async def main():
+
+    print("BOT STARTING...")
+
+    await tg.init()
+
+    await tg.send("✅ Bot is running")
+
+    while True:
+        print("running...")
+        await asyncio.sleep(60)
+
+asyncio.run(main())
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
