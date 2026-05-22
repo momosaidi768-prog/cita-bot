@@ -1,28 +1,13 @@
 import asyncio
 import sqlite3
 import aiohttp
+import os
 from playwright.async_api import async_playwright
 
 # ================= CONFIG =================
 
-import os
-
-async def main():
-
-    print("BOT STARTING...")
-
-    await tg.init()
-
-    print("TELEGRAM READY")
-
-    await tg.send("✅ Bot is running")
-
-    while True:
-        print("running...")
-        await asyncio.sleep(60)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
@@ -75,42 +60,47 @@ conn.commit()
 # ================= USERS =================
 
 def add_user(name, nie, phone, email, city):
-
     cur.execute("""
     INSERT INTO users(name,nie,phone,email,city)
     VALUES(?,?,?,?,?)
     """, (name, nie, phone, email, city.upper()))
-
     conn.commit()
 
-
 def list_users():
-
     cur.execute("""
     SELECT name,nie,city
     FROM users
     WHERE active=1
     """)
-
     return cur.fetchall()
 
-
 def get_users():
-
     cur.execute("""
     SELECT name,nie,phone,email,city
     FROM users
     WHERE active=1
     """)
-
     return cur.fetchall()
 
-
 def delete_user(nie):
-
-    cur.execute("""
-        DELETE FROM users
-        WHERE nie=?
-    """, (nie,))
-
+    cur.execute("DELETE FROM users WHERE nie=?", (nie,))
     conn.commit()
+
+# ================= MAIN LOOP (IMPORTANT) =================
+
+async def main():
+
+    print("BOT STARTING...")
+
+    await tg.init()
+
+    print("TELEGRAM READY")
+
+    await tg.send("✅ Bot is running")
+
+    while True:
+        print("running...")
+        await asyncio.sleep(60)
+
+if __name__ == "__main__":
+    asyncio.run(main())
