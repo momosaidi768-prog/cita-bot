@@ -19,10 +19,7 @@ async def main():
     await tg.send("✅ Bot is running")
 
     while True:
-        print("running...")
         await asyncio.sleep(60)
-
-asyncio.run(main())
 
 asyncio.run(main())
 
