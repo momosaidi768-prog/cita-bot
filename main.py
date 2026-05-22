@@ -14,7 +14,9 @@ async def main():
 
     await tg.init()
 
-    await tg.send("✅ Bot is running")
+    print("TELEGRAM READY")
+
+    await tg.send("✅ Bot started successfully")
 
     while True:
         print("running...")
