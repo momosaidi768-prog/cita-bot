@@ -18,9 +18,11 @@ async def main():
     await tg.send("✅ Bot is running")
 
     while True:
+        print("running...")
         await asyncio.sleep(60)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
