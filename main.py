@@ -2,8 +2,8 @@ import os
 import aiohttp
 import asyncio
 
-TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+TOKEN = os.getenv("8202293986:AAHL6nkd54h-D4_CTid6P9IQYcjj3nYQ9n8")
+ADMIN_ID = int(os.getenv("6675176280"))
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
