@@ -1,51 +1,130 @@
-import os
-import aiohttp
 import asyncio
+import sqlite3
+import aiohttp
+import os
 
-# ✅ صححنا هادو
-TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
+TOKEN = "PUT_YOUR_BOT_TOKEN"
+ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
-async def send(msg):
-    async with aiohttp.ClientSession() as s:
-        await s.post(TG_URL, data={
-            "chat_id": ADMIN_ID,
-            "text": msg
-        })
+BOOKING_URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
+
+# ================= TELEGRAM =================
+
+class Telegram:
+    def __init__(self):
+        self.session = None
+
+    async def init(self):
+        self.session = aiohttp.ClientSession()
+
+    async def send(self, msg):
+        await self.session.post(
+            TG_URL,
+            data={"chat_id": ADMIN_ID, "text": msg}
+        )
+
+tg = Telegram()
+
+# ================= DB =================
+
+conn = sqlite3.connect("users.db", check_same_thread=False)
+cur = conn.cursor()
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    nie TEXT,
+    phone TEXT,
+    email TEXT
+)
+""")
+conn.commit()
+
+# ================= STATE (form) =================
+
+user_state = {}
+
+# ================= HANDLER =================
+
+async def handle(text):
+
+    global user_state
+
+    # start form
+    if text == "/start":
+        user_state["step"] = "name"
+        await tg.send("👤 اكتب الاسم ديالك:")
+
+    elif "step" in user_state:
+
+        step = user_state["step"]
+
+        if step == "name":
+            user_state["name"] = text
+            user_state["step"] = "nie"
+            await tg.send("📄 اكتب NIE:")
+
+        elif step == "nie":
+            user_state["nie"] = text
+            user_state["step"] = "phone"
+            await tg.send("📞 اكتب رقم الهاتف:")
+
+        elif step == "phone":
+            user_state["phone"] = text
+            user_state["step"] = "email"
+            await tg.send("📧 اكتب الإيميل:")
+
+        elif step == "email":
+            user_state["email"] = text
+
+            # save
+            cur.execute(
+                "INSERT INTO users(name,nie,phone,email) VALUES(?,?,?,?)",
+                (user_state["name"], user_state["nie"],
+                 user_state["phone"], user_state["email"])
+            )
+            conn.commit()
+
+            # final message
+            await tg.send(
+                "✅ تم حفظ المعلومات\n\n"
+                f"👤 {user_state['name']}\n"
+                f"📄 {user_state['nie']}\n"
+                f"📞 {user_state['phone']}\n"
+                f"📧 {user_state['email']}\n\n"
+                f"🔗 رابط الحجز:\n{BOOKING_URL}\n\n"
+                "👉 دير الحجز يدويًا واضغط confirm"
+            )
+
+            user_state = {}
+
+# ================= MAIN =================
 
 async def main():
 
-    await send("🤖 Bot started successfully!")
+    await tg.init()
+    print("Bot started")
 
-    offset = 0
+    offset = None
 
     while True:
-        try:
-            async with aiohttp.ClientSession() as s:
-                url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
-                async with s.get(url, params={"offset": offset}) as r:
-                    data = await r.json()
 
-            for upd in data.get("result", []):
-                offset = upd["update_id"] + 1
+        async with aiohttp.ClientSession() as s:
+            async with s.get(
+                f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}"
+            ) as r:
+                data = await r.json()
 
-                if "message" in upd:
-                    text = upd["message"]["text"]
+        for upd in data.get("result", []):
 
-                    # ✅ commands
-                    if text.startswith("/start"):
-                        await send("👋 Bot is working")
+            offset = upd["update_id"] + 1
 
-                    elif text.startswith("/test"):
-                        await send("✅ Test OK")
-
-                    else:
-                        await send(f"📩 Echo: {text}")
-
-        except Exception as e:
-            print("error:", e)
+            if "message" in upd:
+                text = upd["message"].get("text", "")
+                await handle(text)
 
         await asyncio.sleep(2)
 
