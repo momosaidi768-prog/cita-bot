@@ -9,6 +9,10 @@ from playwright.async_api import async_playwright
 import os
 
 TOKEN = os.getenv("BOT_TOKEN")
+
+print("TOKEN =", os.getenv("BOT_TOKEN"))
+print("ADMIN_ID =", os.getenv("ADMIN_ID"))
+
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
