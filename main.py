@@ -2,7 +2,7 @@ import asyncio
 import aiohttp
 from playwright.async_api import async_playwright
 
-TOKEN = "8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps"
+TOKEN = "PUT_YOUR_BOT_TOKEN"
 ADMIN_ID = 6675176280
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -19,11 +19,21 @@ class Telegram:
             self.session = aiohttp.ClientSession()
 
     async def send(self, msg):
+
         await self.init()
+        msg = str(msg)
+
+        # 🔥 FIX: Telegram limit
+        if len(msg) > 3500:
+            msg = msg[:3500] + "\n...\n⚠️ TRUNCATED"
+
         try:
             async with self.session.post(
                 f"{TG_URL}/sendMessage",
-                data={"chat_id": ADMIN_ID, "text": msg}
+                data={
+                    "chat_id": ADMIN_ID,
+                    "text": msg
+                }
             ) as r:
                 print("TG:", await r.text())
         except Exception as e:
@@ -31,9 +41,10 @@ class Telegram:
 
 tg = Telegram()
 
-# ================= WORKER =================
+# ================= PLAYWRIGHT WORKER =================
 
 async def worker():
+
     global running
 
     print("🚀 WORKER STARTED")
@@ -42,7 +53,6 @@ async def worker():
         async with async_playwright() as p:
 
             browser = await p.chromium.launch(
-                channel="chromium",
                 headless=True,
                 args=[
                     "--no-sandbox",
@@ -53,21 +63,24 @@ async def worker():
 
             page = await browser.new_page()
 
-            await page.goto("https://example.com")
-
             await tg.send("🤖 Bot started successfully")
 
             while running:
-                print("🔁 ALIVE WORKING...")
-                await asyncio.sleep(5)
+
+                try:
+                    print("🔁 ALIVE CHECK")
+                    await asyncio.sleep(5)
+
+                except Exception as e:
+                    await tg.send(f"⚠️ Worker error: {str(e)[:200]}")
 
     except Exception as e:
-        print("❌ WORKER ERROR:", e)
-        await tg.send(f"❌ Worker crashed: {e}")
+        await tg.send(f"❌ Worker crashed:\n{str(e)[:1000]}")
 
-# ================= COMMANDS =================
+# ================= COMMAND HANDLER =================
 
 async def handle(text):
+
     global running
 
     print("CMD:", text)
@@ -75,6 +88,7 @@ async def handle(text):
     if text == "/startbot":
 
         if running:
+            await tg.send("⚠️ Bot already running")
             return
 
         running = True
