@@ -31,29 +31,9 @@ class Telegram:
 
 tg = Telegram()
 
-# ================= MONITOR (PLAYWRIGHT) =================
-
-async def check_site(page):
-
-    try:
-        await page.goto("https://example.com", timeout=60000)
-
-        html = await page.content()
-
-        # 🔥 مثال شرط (بدلو حسب الموقع ديالك)
-        if "example" in html.lower():
-            return True
-
-        return False
-
-    except Exception as e:
-        print("CHECK ERROR:", e)
-        return False
-
 # ================= WORKER =================
 
 async def worker():
-
     global running
 
     print("🚀 WORKER STARTED")
@@ -62,36 +42,27 @@ async def worker():
         async with async_playwright() as p:
 
             browser = await p.chromium.launch(
+                channel="chromium",
                 headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu"
+                ]
             )
 
             page = await browser.new_page()
 
-            await tg.send("🤖 Monitoring started")
+            await page.goto("https://example.com")
 
-            last_state = None
+            await tg.send("🤖 Bot started successfully")
 
             while running:
-
-                state = await check_site(page)
-
-                # 🔔 غير إلى تبدل الحالة
-                if state != last_state:
-
-                    if state:
-                        await tg.send("🔥 NEW AVAILABILITY DETECTED!")
-                    else:
-                        await tg.send("❌ No availability")
-
-                    last_state = state
-
-                print("🔁 checking...")
-
-                await asyncio.sleep(10)
+                print("🔁 ALIVE WORKING...")
+                await asyncio.sleep(5)
 
     except Exception as e:
-        print("WORKER ERROR:", e)
+        print("❌ WORKER ERROR:", e)
         await tg.send(f"❌ Worker crashed: {e}")
 
 # ================= COMMANDS =================
@@ -116,7 +87,7 @@ async def handle(text):
         running = False
         await tg.send("⛔ Bot stopped")
 
-# ================= TELEGRAM LOOP =================
+# ================= TELEGRAM POLLING =================
 
 async def main():
 
@@ -154,6 +125,8 @@ async def main():
             print("MAIN ERROR:", e)
 
         await asyncio.sleep(2)
+
+# ================= START =================
 
 if __name__ == "__main__":
     asyncio.run(main())
