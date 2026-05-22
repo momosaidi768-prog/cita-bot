@@ -11,7 +11,6 @@ TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
 
 CITIES = ["MADRID", "BARCELONA", "SEVILLA"]
-
 SERVICE = "POLICÍA - TOMA DE HUELLAS"
 
 # ================= TELEGRAM =================
@@ -24,15 +23,14 @@ class Telegram:
         self.session = aiohttp.ClientSession()
 
     async def send(self, msg):
-        if not self.session:
-            await self.init()
-
         try:
-            async with self.session.post(
+            if not self.session:
+                await self.init()
+
+            await self.session.post(
                 TG_URL,
                 data={"chat_id": ADMIN_ID, "text": msg}
-            ):
-                pass
+            )
         except Exception as e:
             print("Telegram error:", e)
 
@@ -57,7 +55,7 @@ def get_users():
     cur.execute("SELECT * FROM users")
     return cur.fetchall()
 
-# ================= SAFE NAV =================
+# ================= SAFE GOTO =================
 
 async def safe_goto(page, url):
     for i in range(5):
@@ -69,7 +67,7 @@ async def safe_goto(page, url):
             )
             return True
         except Exception as e:
-            print(f"[NAV RETRY {i+1}] {e}")
+            print(f"[RETRY {i+1}] {e}")
             await asyncio.sleep(5)
     return False
 
@@ -83,58 +81,4 @@ async def worker():
             headless=True,
             args=[
                 "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-        )
-
-        page = await browser.new_page()
-
-        page.set_default_timeout(60000)
-        page.set_default_navigation_timeout(120000)
-
-        await tg.send("🤖 PRO Bot started")
-
-        while True:
-
-            users = get_users()
-
-            for city in CITIES:
-                for u in users:
-
-                    ok = await safe_goto(page, URL)
-
-                    if not ok:
-                        continue
-
-                    try:
-                        await page.locator("select").first.select_option(label=city)
-                        await page.click("input[type='submit']")
-                        await page.wait_for_load_state("domcontentloaded")
-
-                        await page.locator("select").first.select_option(label=SERVICE)
-                        await page.click("input[type='submit']")
-
-                        html = await page.content()
-
-                        if "no hay citas" not in html.lower():
-
-                            await tg.send(
-                                f"🔥 APPOINTMENT FOUND\n📍 {city}\n👤 {u[0]}\n📄 {u[1]}"
-                            )
-
-                        await asyncio.sleep(3)
-
-                    except Exception as e:
-                        print("ERROR:", e)
-
-            await asyncio.sleep(8)
-
-# ================= MAIN =================
-
-async def main():
-    await tg.init()
-    await worker()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+                "--disable-setuid-sandbox
