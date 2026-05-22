@@ -2,12 +2,16 @@ import asyncio
 import aiohttp
 from playwright.async_api import async_playwright
 
-TOKEN = "8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps"
+TOKEN = "PUT_YOUR_BOT_TOKEN"
 ADMIN_ID = 6675176280
 
 BASE_URL = f"https://api.telegram.org/bot{TOKEN}"
 
+URL = "https://example.com"  # بدّلها بأي صفحة قانونية
+
 running = False
+last_state = None
+
 
 # ================= TELEGRAM =================
 
@@ -24,81 +28,92 @@ class Telegram:
 
         msg = str(msg)
 
-        # 🔥 حل مشكلة طول الرسالة
         if len(msg) > 3500:
-            msg = msg[:3500] + "\n...\n⚠️ TRUNCATED"
+            msg = msg[:3500] + "\n...\nTRUNCATED"
 
         try:
-            async with self.session.post(
+            await self.session.post(
                 f"{BASE_URL}/sendMessage",
-                data={
-                    "chat_id": ADMIN_ID,
-                    "text": msg
-                }
-            ) as r:
-                print("TG:", await r.text())
+                data={"chat_id": ADMIN_ID, "text": msg}
+            )
         except Exception as e:
             print("TG ERROR:", e)
 
+
 tg = Telegram()
+
+
+# ================= PAGE CHECK =================
+
+async def check_page(page):
+    await page.goto(URL, wait_until="domcontentloaded")
+    html = await page.content()
+
+    if "no hay citas" in html.lower():
+        return "EMPTY"
+
+    return hash(html)  # detect change
+
 
 # ================= WORKER =================
 
 async def worker():
-    global running
+
+    global running, last_state
 
     print("🚀 WORKER STARTED")
 
-    try:
-        async with async_playwright() as p:
+    async with async_playwright() as p:
 
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu"
-                ]
-            )
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
 
-            page = await browser.new_page()
+        page = await browser.new_page()
 
-            await tg.send("🤖 Bot started successfully")
+        await tg.send("🤖 Monitoring started")
 
-            while running:
+        while running:
 
-                try:
-                    print("🔁 ALIVE")
-                    await asyncio.sleep(5)
+            try:
+                state = await check_page(page)
 
-                except Exception as e:
-                    await tg.send(f"⚠️ Worker error: {str(e)[:200]}")
+                if last_state is None:
+                    last_state = state
 
-    except Exception as e:
-        await tg.send(f"❌ Worker crashed:\n{str(e)[:1000]}")
+                elif state != last_state:
+                    await tg.send("🔥 CHANGE DETECTED ON PAGE")
+                    last_state = state
 
-# ================= COMMAND HANDLER =================
+                print("🔁 checking...")
+                await asyncio.sleep(60)
+
+            except Exception as e:
+                print("WORKER ERROR:", e)
+                await asyncio.sleep(10)
+
+        await browser.close()
+
+
+# ================= COMMANDS =================
 
 async def handle(text):
-    global running
-
-    print("CMD:", text)
+    global running, worker_task
 
     if text == "/startbot":
-
         if running:
-            await tg.send("⚠️ Bot already running")
+            await tg.send("⚠️ Already running")
             return
 
         running = True
         asyncio.create_task(worker())
-
         await tg.send("🚀 Bot started")
 
     elif text == "/stopbot":
-
         running = False
         await tg.send("⛔ Bot stopped")
+
 
 # ================= TELEGRAM LOOP =================
 
@@ -117,7 +132,6 @@ async def main():
                 async with s.get(
                     f"{BASE_URL}/getUpdates?offset={offset}"
                 ) as r:
-
                     data = await r.json()
 
             if data.get("ok"):
@@ -139,7 +153,6 @@ async def main():
 
         await asyncio.sleep(2)
 
-# ================= START =================
 
 if __name__ == "__main__":
     asyncio.run(main())
