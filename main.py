@@ -3,7 +3,7 @@ import aiohttp
 import asyncio
 
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
@@ -15,9 +15,10 @@ async def send(msg):
         })
 
 async def main():
-    await send("🤖 Test bot is running!")
 
-    offset = None
+    await send("🤖 Bot started successfully!")
+
+    offset = 0  # مهم جداً
 
     while True:
         try:
@@ -27,12 +28,16 @@ async def main():
                     data = await r.json()
 
             for upd in data.get("result", []):
-                offset = upd["update_id"] + 1
+                offset = upd["update_id"] + 1  # يمنع التكرار
 
                 if "message" in upd:
                     text = upd["message"]["text"]
 
-                    await send(f"📩 Echo: {text}")
+                    # تجاهل رسائل النظام
+                    if text.startswith("/"):
+                        await send("✅ Command received")
+                    else:
+                        await send(f"📩 Echo: {text}")
 
         except Exception as e:
             print("error:", e)
