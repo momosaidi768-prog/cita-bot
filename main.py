@@ -1,15 +1,17 @@
 import asyncio
-import sqlite3
 import aiohttp
 import os
 
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = os.getenv("ADMIN_ID")
+
+print("TOKEN =", TOKEN)
+print("ADMIN =", ADMIN_ID)
 
 if not TOKEN:
     print("❌ BOT_TOKEN is missing")
     exit()
 
-ADMIN_ID = 6675176280
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
 class Telegram:
@@ -37,7 +39,7 @@ async def main():
 
     print("TELEGRAM READY")
 
-    await tg.send("Bot started")
+    await tg.send("Bot is running")
 
     while True:
         print("running...")
@@ -47,4 +49,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except Exception as e:
-        print("CRASH ERROR:", e)
+        print("CRASH:", e)
