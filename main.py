@@ -2,18 +2,13 @@ import asyncio
 import sqlite3
 import aiohttp
 import os
-from playwright.async_api import async_playwright
 
 # ================= CONFIG =================
 
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")  # لازم يكون ف Railway Variables
 ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-
-URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
-
-SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 
 # ================= TELEGRAM =================
 
@@ -25,6 +20,8 @@ class Telegram:
         self.session = aiohttp.ClientSession()
 
     async def send(self, msg):
+        if not self.session:
+            return
         try:
             await self.session.post(
                 TG_URL,
@@ -67,26 +64,18 @@ def add_user(name, nie, phone, email, city):
     conn.commit()
 
 def list_users():
-    cur.execute("""
-    SELECT name,nie,city
-    FROM users
-    WHERE active=1
-    """)
+    cur.execute("SELECT name,nie,city FROM users WHERE active=1")
     return cur.fetchall()
 
 def get_users():
-    cur.execute("""
-    SELECT name,nie,phone,email,city
-    FROM users
-    WHERE active=1
-    """)
+    cur.execute("SELECT name,nie,phone,email,city FROM users WHERE active=1")
     return cur.fetchall()
 
 def delete_user(nie):
     cur.execute("DELETE FROM users WHERE nie=?", (nie,))
     conn.commit()
 
-# ================= MAIN LOOP (IMPORTANT) =================
+# ================= MAIN LOOP =================
 
 async def main():
 
@@ -96,11 +85,16 @@ async def main():
 
     print("TELEGRAM READY")
 
-    await tg.send("✅ Bot is running")
+    await tg.send("✅ Bot is running on Railway")
 
     while True:
         print("running...")
         await asyncio.sleep(60)
 
+# ================= START =================
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        print("Fatal error:", e)
