@@ -3,14 +3,14 @@ import sqlite3
 import aiohttp
 import os
 
-# ================= CONFIG =================
+TOKEN = os.getenv("BOT_TOKEN")
 
-TOKEN = os.getenv("BOT_TOKEN")  # لازم يكون ف Railway Variables
+if not TOKEN:
+    print("❌ BOT_TOKEN is missing")
+    exit()
+
 ADMIN_ID = 6675176280
-
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-
-# ================= TELEGRAM =================
 
 class Telegram:
     def __init__(self):
@@ -20,81 +20,31 @@ class Telegram:
         self.session = aiohttp.ClientSession()
 
     async def send(self, msg):
-        if not self.session:
-            return
         try:
             await self.session.post(
                 TG_URL,
-                data={
-                    "chat_id": ADMIN_ID,
-                    "text": msg
-                }
+                data={"chat_id": ADMIN_ID, "text": msg}
             )
         except Exception as e:
             print("Telegram error:", e)
 
 tg = Telegram()
 
-# ================= DATABASE =================
-
-conn = sqlite3.connect("users.db", check_same_thread=False)
-cur = conn.cursor()
-
-cur.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    nie TEXT,
-    phone TEXT,
-    email TEXT,
-    city TEXT,
-    active INTEGER DEFAULT 1
-)
-""")
-
-conn.commit()
-
-# ================= USERS =================
-
-def add_user(name, nie, phone, email, city):
-    cur.execute("""
-    INSERT INTO users(name,nie,phone,email,city)
-    VALUES(?,?,?,?,?)
-    """, (name, nie, phone, email, city.upper()))
-    conn.commit()
-
-def list_users():
-    cur.execute("SELECT name,nie,city FROM users WHERE active=1")
-    return cur.fetchall()
-
-def get_users():
-    cur.execute("SELECT name,nie,phone,email,city FROM users WHERE active=1")
-    return cur.fetchall()
-
-def delete_user(nie):
-    cur.execute("DELETE FROM users WHERE nie=?", (nie,))
-    conn.commit()
-
-# ================= MAIN LOOP =================
-
 async def main():
-
     print("BOT STARTING...")
 
     await tg.init()
 
     print("TELEGRAM READY")
 
-    await tg.send("✅ Bot is running on Railway")
+    await tg.send("Bot started")
 
     while True:
         print("running...")
         await asyncio.sleep(60)
 
-# ================= START =================
-
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except Exception as e:
-        print("Fatal error:", e)
+        print("CRASH ERROR:", e)
