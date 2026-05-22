@@ -2,13 +2,23 @@ import asyncio
 import sqlite3
 import aiohttp
 import os
+from playwright.async_api import async_playwright
 
-TOKEN = "PUT_YOUR_BOT_TOKEN"
-ADMIN_ID = 6675176280
+# ================= CONFIG =================
+
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
-BOOKING_URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
+URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
+
+CITIES = [
+    "MADRID","BARCELONA","TOLEDO","ALICANTE","SEVILLA",
+    "BILBAO","VALENCIA","GRANADA","CORDOBA","MALAGA"
+]
+
+SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 
 # ================= TELEGRAM =================
 
@@ -20,111 +30,186 @@ class Telegram:
         self.session = aiohttp.ClientSession()
 
     async def send(self, msg):
-        await self.session.post(
-            TG_URL,
-            data={"chat_id": ADMIN_ID, "text": msg}
-        )
+        try:
+            await self.session.post(TG_URL, data={
+                "chat_id": ADMIN_ID,
+                "text": msg
+            })
+        except:
+            pass
 
 tg = Telegram()
 
-# ================= DB =================
+# ================= DATABASE =================
 
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cur = conn.cursor()
 
 cur.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT,
     nie TEXT,
+    city TEXT,
+    email TEXT,
     phone TEXT,
-    email TEXT
+    active INTEGER DEFAULT 1
 )
 """)
 conn.commit()
 
-# ================= STATE (form) =================
+def add_user(name, nie, city, email, phone):
+    cur.execute(
+        "INSERT INTO users(name,nie,city,email,phone) VALUES(?,?,?,?,?)",
+        (name, nie, city, email, phone)
+    )
+    conn.commit()
 
-user_state = {}
+def list_users():
+    cur.execute("SELECT name,nie,city FROM users WHERE active=1")
+    return cur.fetchall()
 
-# ================= HANDLER =================
+def get_users_by_city(city):
+    cur.execute(
+        "SELECT name,nie,city,email,phone FROM users WHERE city=? AND active=1",
+        (city,)
+    )
+    return cur.fetchall()
+
+# ================= PLAYWRIGHT =================
+
+async def check(page, city):
+    try:
+        await page.goto(URL, timeout=60000)
+        await page.wait_for_load_state("domcontentloaded")
+
+        selects = page.locator("select")
+        await selects.first.select_option(label=city)
+
+        await page.click("input[type='submit']")
+        await page.wait_for_load_state("domcontentloaded")
+
+        selects = page.locator("select")
+        await selects.first.select_option(label=SERVICE)
+
+        await page.click("input[type='submit']")
+        await page.wait_for_load_state("domcontentloaded")
+
+        html = await page.content()
+
+        return "no hay citas" not in html.lower()
+
+    except:
+        return False
+
+# ================= BOT LOOP =================
+
+running = False
+
+async def worker():
+    global running
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox"]
+        )
+        page = await browser.new_page()
+
+        while running:
+
+            for city in CITIES:
+
+                users = get_users_by_city(city)
+
+                for user in users:
+
+                    found = await check(page, city)
+
+                    if found:
+                        await tg.send(f"""
+🔥 APPOINTMENT FOUND
+
+📍 City: {city}
+
+👤 {user[0]}
+📄 NIE: {user[1]}
+🏙 City: {user[2]}
+📧 {user[3]}
+📞 {user[4]}
+
+🔗 {URL}
+
+⚠ Confirm manually
+""")
+
+                        await asyncio.sleep(60)
+
+                    await asyncio.sleep(2)
+
+        await browser.close()
+
+# ================= COMMANDS =================
 
 async def handle(text):
 
-    global user_state
+    global running
 
-    # start form
-    if text == "/start":
-        user_state["step"] = "name"
-        await tg.send("👤 اكتب الاسم ديالك:")
+    if text.startswith("/add"):
+        try:
+            _, name, nie, city, email, phone = text.split(" ")
 
-    elif "step" in user_state:
+            add_user(name, nie, city, email, phone)
+            await tg.send("✅ User added")
 
-        step = user_state["step"]
+        except:
+            await tg.send("❌ Format: /add name nie city email phone")
 
-        if step == "name":
-            user_state["name"] = text
-            user_state["step"] = "nie"
-            await tg.send("📄 اكتب NIE:")
+    elif text == "/list":
+        users = list_users()
+        await tg.send("\n".join([f"{u[0]} - {u[1]} - {u[2]}" for u in users]))
 
-        elif step == "nie":
-            user_state["nie"] = text
-            user_state["step"] = "phone"
-            await tg.send("📞 اكتب رقم الهاتف:")
+    elif text == "/startbot":
+        if not running:
+            running = True
+            asyncio.create_task(worker())
+            await tg.send("🚀 Bot started")
 
-        elif step == "phone":
-            user_state["phone"] = text
-            user_state["step"] = "email"
-            await tg.send("📧 اكتب الإيميل:")
-
-        elif step == "email":
-            user_state["email"] = text
-
-            # save
-            cur.execute(
-                "INSERT INTO users(name,nie,phone,email) VALUES(?,?,?,?)",
-                (user_state["name"], user_state["nie"],
-                 user_state["phone"], user_state["email"])
-            )
-            conn.commit()
-
-            # final message
-            await tg.send(
-                "✅ تم حفظ المعلومات\n\n"
-                f"👤 {user_state['name']}\n"
-                f"📄 {user_state['nie']}\n"
-                f"📞 {user_state['phone']}\n"
-                f"📧 {user_state['email']}\n\n"
-                f"🔗 رابط الحجز:\n{BOOKING_URL}\n\n"
-                "👉 دير الحجز يدويًا واضغط confirm"
-            )
-
-            user_state = {}
+    elif text == "/stopbot":
+        running = False
+        await tg.send("⛔ Bot stopped")
 
 # ================= MAIN =================
 
 async def main():
 
     await tg.init()
-    print("Bot started")
+    await tg.send("🤖 Bot ready")
 
     offset = None
 
     while True:
 
-        async with aiohttp.ClientSession() as s:
-            async with s.get(
-                f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}"
-            ) as r:
-                data = await r.json()
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(
+                    f"https://api.telegram.org/bot{TOKEN}/getUpdates?offset={offset}"
+                ) as r:
+                    data = await r.json()
 
-        for upd in data.get("result", []):
+            for upd in data.get("result", []):
 
-            offset = upd["update_id"] + 1
+                offset = upd["update_id"] + 1
 
-            if "message" in upd:
-                text = upd["message"].get("text", "")
-                await handle(text)
+                msg = upd.get("message", {}).get("text")
+
+                if msg:
+                    chat_id = upd["message"]["chat"]["id"]
+
+                    if chat_id == ADMIN_ID:
+                        await handle(msg)
+
+        except:
+            pass
 
         await asyncio.sleep(2)
 
