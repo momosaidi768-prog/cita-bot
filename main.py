@@ -10,7 +10,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
-
 URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
 
 SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
@@ -18,7 +17,6 @@ SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 # ================= TELEGRAM =================
 
 class Telegram:
-
     def __init__(self):
         self.session = None
 
@@ -31,13 +29,12 @@ class Telegram:
     async def send(self, msg):
         await self.init()
         try:
-            async with self.session.post(
+            await self.session.post(
                 f"{TG_URL}/sendMessage",
                 data={"chat_id": ADMIN_ID, "text": str(msg)[:4000]}
-            ) as r:
-                await r.text()
+            )
         except Exception as e:
-            print("TELEGRAM ERROR:", e)
+            print("TG ERROR:", e)
 
 tg = Telegram()
 
@@ -57,52 +54,35 @@ CREATE TABLE IF NOT EXISTS users (
     active INTEGER DEFAULT 1
 )
 """)
-
 conn.commit()
-
-def add_user(name, nie, phone, email, cities):
-    cur.execute("""
-        INSERT INTO users (name, nie, phone, email, cities)
-        VALUES (?, ?, ?, ?, ?)
-    """, (name, nie, phone, email, cities))
-    conn.commit()
 
 def get_users():
     cur.execute("""
         SELECT name, nie, phone, email, cities
-        FROM users
-        WHERE active=1
+        FROM users WHERE active=1
     """)
     return cur.fetchall()
 
-# ================= SAFE NAVIGATION =================
+# ================= SAFE GOTO =================
 
 async def safe_goto(page, url):
 
     for i in range(5):
-
         try:
             print(f"🌐 GOTO attempt {i+1}")
 
-            response = await page.goto(
-                url,
-                timeout=120000,
-                wait_until="domcontentloaded"
-            )
-
-            if response is None:
-                raise Exception("No response")
+            await page.goto(url, timeout=120000)
 
             await page.wait_for_selector("select", timeout=30000)
 
             return True
 
         except Exception as e:
-
             err = str(e)
 
-            if "TIMEOUT" in err or "ERR_CONNECTION_TIMED_OUT" in err:
+            if "Timeout" in err or "ERR_CONNECTION" in err:
                 print("🌐 NETWORK BLOCKED / TIMEOUT")
+
             else:
                 print("GOTO ERROR:", err)
 
@@ -115,22 +95,18 @@ async def safe_goto(page, url):
 async def check(page, city):
 
     try:
-
         ok = await safe_goto(page, URL)
-
         if not ok:
             return None
 
-        print(f"📍 Checking city: {city}")
+        print(f"📍 Checking: {city}")
 
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(2000)
 
         selects = page.locator("select")
-
-        if await selects.count() < 1:
+        if await selects.count() == 0:
             return None
 
-        # CITY
         try:
             await selects.nth(0).select_option(label=city)
         except:
@@ -139,7 +115,6 @@ async def check(page, city):
         await page.click("input[type='submit']")
         await page.wait_for_load_state("load")
 
-        # SERVICE
         selects = page.locator("select")
 
         try:
@@ -153,21 +128,19 @@ async def check(page, city):
         html = await page.content()
 
         if "no hay citas" in html.lower():
-            print(f"❌ No appointments in {city}")
+            print(f"❌ No slots in {city}")
             return None
 
-        print(f"🔥 APPOINTMENT FOUND IN {city}")
-
+        print(f"🔥 FOUND in {city}")
         return page.url
 
     except Exception as e:
         print("CHECK ERROR:", e)
         return None
 
-# ================= WORKER =================
+# ================= WORKER (CRASH SAFE) =================
 
 running = False
-worker_task = None
 
 async def worker():
 
@@ -175,41 +148,33 @@ async def worker():
 
     print("🚀 WORKER STARTED")
 
-    try:
+    async with async_playwright() as p:
 
-        async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
+            ]
+        )
 
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu"
-                ]
-            )
+        context = await browser.new_context(
+            locale="es-ES"
+        )
 
-            context = await browser.new_context(
-                locale="es-ES",
-                viewport={"width": 1280, "height": 720}
-            )
+        page = await context.new_page()
 
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            """)
+        await tg.send("🤖 BOT STARTED")
 
-            page = await context.new_page()
+        while running:
 
-            await tg.send("🤖 Bot started")
-
-            while running:
+            try:
 
                 users = get_users()
 
                 if not users:
-                    print("⚠️ No users in DB")
+                    print("⚠️ No users")
                     await asyncio.sleep(10)
                     continue
 
@@ -224,118 +189,54 @@ async def worker():
 
                         if result:
 
-                            try:
-
-                                await page.screenshot(
-                                    path="shot.png",
-                                    full_page=True
-                                )
-
-                                form = aiohttp.FormData()
-
-                                form.add_field("chat_id", str(ADMIN_ID))
-
-                                form.add_field(
-                                    "caption",
-                                    f"""
+                            await tg.send(f"""
 🔥 APPOINTMENT FOUND
 
 👤 {name}
-📄 {nie}
-📞 {phone}
-📧 {email}
 📍 {city}
-
 🔗 {result}
-"""
-                                )
-
-                                form.add_field(
-                                    "photo",
-                                    open("shot.png", "rb"),
-                                    filename="shot.png",
-                                    content_type="image/png"
-                                )
-
-                                await tg.session.post(
-                                    f"{TG_URL}/sendPhoto",
-                                    data=form
-                                )
-
-                            except Exception as e:
-                                print("PHOTO ERROR:", e)
-                                await tg.send(f"🔥 FOUND\n📍 {city}\n🔗 {result}")
+""")
 
                             await asyncio.sleep(60)
 
                         await asyncio.sleep(3)
 
-    except Exception as e:
-        print("WORKER ERROR:", e)
-        await tg.send(f"❌ WORKER ERROR:\n{str(e)[:500]}")
+                await asyncio.sleep(10)
 
-# ================= COMMANDS =================
+            except Exception as e:
+                print("WORKER LOOP ERROR:", e)
+                await asyncio.sleep(5)
+
+        await browser.close()
+
+# ================= CONTROLLER =================
 
 async def handle(text):
 
-    global running, worker_task
+    global running
 
-    if text.startswith("/add"):
-
-        parts = text.split("|")
-
-        if len(parts) != 6:
-            await tg.send("❌ /add|name|nie|phone|email|cities")
-            return
-
-        _, name, nie, phone, email, cities = parts
-
-        add_user(name, nie, phone, email, cities)
-        await tg.send("✅ User added")
-
-    elif text == "/startbot":
+    if text == "/startbot":
 
         if running:
-            await tg.send("⚠️ already running")
+            await tg.send("⚠️ Already running")
             return
 
         running = True
-        worker_task = asyncio.create_task(worker())
+        asyncio.create_task(worker())
 
-        await tg.send("🚀 bot started")
+        await tg.send("🚀 BOT STARTED")
 
     elif text == "/stopbot":
 
         running = False
-
-        if worker_task:
-            worker_task.cancel()
-
-        await tg.send("⛔ stopped")
-
-    elif text == "/users":
-
-        users = get_users()
-
-        if not users:
-            await tg.send("⚠️ no users")
-            return
-
-        msg = "👥 USERS:\n\n"
-
-        for u in users:
-            msg += f"👤 {u[0]}\n📍 {u[4]}\n\n"
-
-        await tg.send(msg)
+        await tg.send("⛔ STOPPED")
 
 # ================= MAIN =================
 
 async def main():
 
-    print("🔥 BOT STARTING...")
-
     if not TOKEN:
-        print("❌ NO TOKEN")
+        print("NO TOKEN")
         return
 
     await tg.init()
@@ -351,7 +252,7 @@ async def main():
 
                 async with s.get(
                     f"{TG_URL}/getUpdates?offset={offset}",
-                    timeout=120
+                    timeout=60
                 ) as r:
                     data = await r.json()
 
