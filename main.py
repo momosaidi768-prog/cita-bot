@@ -1,11 +1,12 @@
 import asyncio
 import sqlite3
 import aiohttp
+import os
 from playwright.async_api import async_playwright
 
 # ================= CONFIG =================
 
-TOKEN = "8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps"
+TOKEN = os.getenv("8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps")
 ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
@@ -24,25 +25,38 @@ class Telegram:
         self.session = None
 
     async def init(self):
-        if not self.session:
-            self.session = aiohttp.ClientSession()
+        if self.session is None:
+            timeout = aiohttp.ClientTimeout(total=60)
+
+            self.session = aiohttp.ClientSession(
+                timeout=timeout
+            )
 
     async def send(self, msg):
         await self.init()
 
         try:
-            await self.session.post(
+            async with self.session.post(
                 f"{TG_URL}/sendMessage",
-                data={"chat_id": ADMIN_ID, "text": str(msg)[:3500]}
-            )
-        except:
-            pass
+                data={
+                    "chat_id": ADMIN_ID,
+                    "text": str(msg)[:3500]
+                }
+            ) as r:
+                await r.text()
+
+        except Exception as e:
+            print("TG ERROR:", e)
 
 tg = Telegram()
 
 # ================= DATABASE =================
 
-conn = sqlite3.connect("users.db", check_same_thread=False)
+conn = sqlite3.connect(
+    "users.db",
+    check_same_thread=False
+)
+
 cur = conn.cursor()
 
 cur.execute("""
@@ -60,22 +74,36 @@ CREATE TABLE IF NOT EXISTS users (
 conn.commit()
 
 def get_users():
+
     cur.execute("""
         SELECT name, nie, phone, email, cities
         FROM users
         WHERE active=1
     """)
+
     return cur.fetchall()
 
-# ================= NAV SAFE =================
+# ================= SAFE GOTO =================
 
 async def safe_goto(page, url):
-    for _ in range(3):
+
+    for attempt in range(3):
+
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+
             return True
-        except:
-            await asyncio.sleep(2)
+
+        except Exception as e:
+
+            print("GOTO ERROR:", e)
+
+            await asyncio.sleep(3)
+
     return False
 
 # ================= CHECK =================
@@ -83,49 +111,86 @@ async def safe_goto(page, url):
 async def check(page, city):
 
     try:
-        if not await safe_goto(page, URL):
+
+        ok = await safe_goto(page, URL)
+
+        if not ok:
             return None
+
+        print(f"📍 Checking {city}")
 
         selects = page.locator("select")
 
-        if await selects.count() < 2:
+        count = await selects.count()
+
+        if count < 1:
             return None
 
-        # select city
+        # SELECT CITY
+
         try:
-            await selects.nth(0).select_option(label=city)
-        except:
+            await selects.nth(0).select_option(
+                label=city
+            )
+        except Exception as e:
+            print("CITY ERROR:", e)
             return None
 
         await page.click("input[type='submit']")
-        await page.wait_for_load_state("domcontentloaded")
 
-        # select service
+        await page.wait_for_load_state(
+            "domcontentloaded"
+        )
+
+        # SERVICE PAGE
+
+        selects = page.locator("select")
+
         try:
-            await selects.nth(0).select_option(label=SERVICE)
-        except:
+            await selects.nth(0).select_option(
+                label=SERVICE
+            )
+        except Exception as e:
+            print("SERVICE ERROR:", e)
             return None
 
         await page.click("input[type='submit']")
-        await page.wait_for_load_state("domcontentloaded")
+
+        await page.wait_for_load_state(
+            "domcontentloaded"
+        )
 
         html = await page.content()
 
-        # detection logic
+        # DEBUG
+
+        print("PAGE URL:", page.url)
+
         if "no hay citas" in html.lower():
+            print(f"❌ No appointments in {city}")
             return None
+
+        print(f"🔥 APPOINTMENT FOUND IN {city}")
 
         return page.url
 
-    except:
+    except Exception as e:
+
+        print("CHECK ERROR:", e)
+
         return None
 
 # ================= WORKER =================
 
 async def worker():
-    global running, bot_started
+
+    global running
+    global bot_started
+
+    print("🚀 WORKER STARTED")
 
     try:
+
         async with async_playwright() as p:
 
             browser = await p.chromium.launch(
@@ -133,49 +198,85 @@ async def worker():
                 args=[
                     "--no-sandbox",
                     "--disable-dev-shm-usage",
-                    "--disable-gpu"
+                    "--disable-gpu",
+                    "--single-process"
                 ]
             )
 
-            page = await browser.new_page()
+            context = await browser.new_context()
+
+            page = await context.new_page()
 
             if not bot_started:
+
                 await tg.send("🤖 Bot started")
+
                 bot_started = True
 
             while running:
 
                 users = get_users()
 
+                if not users:
+                    print("⚠️ No users in database")
+
                 for user in users:
 
-                    name, nie, phone, email, cities = user
-                    city_list = [c.strip() for c in cities.split(",")]
+                    try:
 
-                    for city in city_list:
+                        name, nie, phone, email, cities = user
 
-                        result = await check(page, city)
+                        city_list = [
+                            c.strip()
+                            for c in cities.split(",")
+                        ]
 
-                        if result:
-                            await tg.send(
-                                f"🔥 APPOINTMENT FOUND\n{name}\n{city}\n{result}"
+                        for city in city_list:
+
+                            result = await check(
+                                page,
+                                city
                             )
 
-                            await asyncio.sleep(30)
+                            if result:
 
-                        await asyncio.sleep(2)
+                                await tg.send(
+                                    f"""
+🔥 APPOINTMENT FOUND
 
-                await asyncio.sleep(5)
+👤 {name}
+📄 {nie}
+📍 {city}
+
+🔗 {result}
+"""
+                                )
+
+                                await asyncio.sleep(30)
+
+                            await asyncio.sleep(3)
+
+                    except Exception as e:
+                        print("USER LOOP ERROR:", e)
+
+                await asyncio.sleep(10)
 
             await browser.close()
 
     except Exception as e:
-        await tg.send(f"❌ Worker crashed: {str(e)[:400]}")
+
+        print("WORKER ERROR:", e)
+
+        await tg.send(
+            f"❌ Worker crashed:\n{str(e)[:400]}"
+        )
 
 # ================= COMMANDS =================
 
 async def handle(text):
-    global running, worker_task
+
+    global running
+    global worker_task
 
     if text == "/startbot":
 
@@ -183,7 +284,10 @@ async def handle(text):
             return
 
         running = True
-        worker_task = asyncio.create_task(worker())
+
+        worker_task = asyncio.create_task(
+            worker()
+        )
 
         await tg.send("🚀 Started")
 
@@ -205,6 +309,10 @@ async def main():
 
     print("🔥 BOT STARTING...")
 
+    if not TOKEN:
+        print("❌ BOT TOKEN NOT FOUND")
+        return
+
     offset = None
 
     await tg.send("🤖 BOT ONLINE")
@@ -212,8 +320,14 @@ async def main():
     while True:
 
         try:
+
             async with aiohttp.ClientSession() as s:
-                async with s.get(f"{TG_URL}/getUpdates?offset={offset}") as r:
+
+                async with s.get(
+                    f"{TG_URL}/getUpdates?offset={offset}",
+                    timeout=60
+                ) as r:
+
                     data = await r.json()
 
             for upd in data.get("result", []):
@@ -223,15 +337,24 @@ async def main():
                 if "message" in upd:
 
                     chat_id = upd["message"]["chat"]["id"]
-                    text = upd["message"].get("text", "")
+
+                    text = upd["message"].get(
+                        "text",
+                        ""
+                    )
 
                     if chat_id == ADMIN_ID:
+
                         await handle(text)
 
         except Exception as e:
+
             print("MAIN ERROR:", e)
 
         await asyncio.sleep(2)
 
+# ================= START =================
+
 if __name__ == "__main__":
+
     asyncio.run(main())
