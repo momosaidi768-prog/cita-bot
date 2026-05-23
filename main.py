@@ -15,6 +15,8 @@ SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 
 running = False
 
+session = None  # مهم: session وحدة فقط
+
 
 # ================= TELEGRAM =================
 
@@ -23,21 +25,20 @@ class Telegram:
         self.session = None
 
     async def init(self):
-        if self.session is None:
-            self.session = aiohttp.ClientSession()
+        global session
+        if session is None:
+            session = aiohttp.ClientSession()
 
     async def send(self, msg):
         await self.init()
 
-        msg = str(msg)
-
-        if len(msg) > 3500:
-            msg = msg[:3500]
-
         try:
-            async with self.session.post(
+            async with session.post(
                 f"{TG_URL}/sendMessage",
-                data={"chat_id": ADMIN_ID, "text": msg}
+                data={
+                    "chat_id": ADMIN_ID,
+                    "text": str(msg)[:3500]
+                }
             ) as r:
                 await r.text()
         except Exception as e:
@@ -83,7 +84,8 @@ async def safe_goto(page, url):
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             return True
-        except:
+        except Exception as e:
+            print("GOTO ERROR:", e)
             await asyncio.sleep(2)
     return False
 
@@ -104,7 +106,6 @@ async def check(page, city):
         if count < 2:
             return None
 
-        # city select
         try:
             await selects.nth(0).select_option(label=city)
         except:
@@ -113,7 +114,6 @@ async def check(page, city):
         await page.click("input[type='submit']")
         await page.wait_for_load_state("domcontentloaded")
 
-        # service select
         try:
             await selects.nth(0).select_option(label=SERVICE)
         except:
@@ -164,7 +164,6 @@ async def worker():
                 users = get_users()
 
                 for user in users:
-
                     name, nie, phone, email, cities = user
                     city_list = [c.strip() for c in cities.split(",")]
 
@@ -173,14 +172,13 @@ async def worker():
                         result = await check(page, city)
 
                         if result:
-                            try:
-                                await page.screenshot(path="shot.png")
+                            print("🔥 APPOINTMENT FOUND")
 
-                                await tg.send(
-                                    f"🔥 FOUND\n{name}\n{nie}\n{city}\n{result}"
-                                )
-                            except:
-                                pass
+                            await page.screenshot(path="shot.png")
+
+                            await tg.send(
+                                f"🔥 FOUND\n{name}\n{nie}\n{city}\n{result}"
+                            )
 
                             await asyncio.sleep(30)
 
@@ -191,6 +189,7 @@ async def worker():
             await browser.close()
 
     except Exception as e:
+        print("WORKER ERROR:", e)
         await tg.send(f"❌ Worker crashed: {str(e)[:500]}")
 
 
@@ -219,23 +218,24 @@ async def main():
 
     print("🔥 BOT STARTING...")
 
-    offset = None
+    await tg.init()
 
     await tg.send("🤖 BOT ONLINE")
 
-    while True:
+    offset = None
 
+    while True:
         try:
-            async with aiohttp.ClientSession() as s:
-                async with s.get(f"{TG_URL}/getUpdates?offset={offset}") as r:
-                    data = await r.json()
+            async with session.get(f"{TG_URL}/getUpdates?offset={offset}") as r:
+                data = await r.json()
+
+            print("LOOP RUNNING")
 
             for upd in data.get("result", []):
 
                 offset = upd["update_id"] + 1
 
                 if "message" in upd:
-
                     chat_id = upd["message"]["chat"]["id"]
                     text = upd["message"].get("text", "")
 
@@ -247,6 +247,8 @@ async def main():
 
         await asyncio.sleep(2)
 
+
+# ================= START =================
 
 if __name__ == "__main__":
     asyncio.run(main())
