@@ -10,8 +10,8 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
-URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
 
+URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
 SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 
 # ================= TELEGRAM =================
@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
+def add_user(name, nie, phone, email, cities):
+    cur.execute("""
+        INSERT INTO users (name, nie, phone, email, cities)
+        VALUES (?, ?, ?, ?, ?)
+    """, (name, nie, phone, email, cities))
+    conn.commit()
+
 def get_users():
     cur.execute("""
         SELECT name, nie, phone, email, cities
@@ -82,7 +89,6 @@ async def safe_goto(page, url):
 
             if "Timeout" in err or "ERR_CONNECTION" in err:
                 print("🌐 NETWORK BLOCKED / TIMEOUT")
-
             else:
                 print("GOTO ERROR:", err)
 
@@ -138,7 +144,7 @@ async def check(page, city):
         print("CHECK ERROR:", e)
         return None
 
-# ================= WORKER (CRASH SAFE) =================
+# ================= WORKER =================
 
 running = False
 
@@ -159,10 +165,7 @@ async def worker():
             ]
         )
 
-        context = await browser.new_context(
-            locale="es-ES"
-        )
-
+        context = await browser.new_context(locale="es-ES")
         page = await context.new_page()
 
         await tg.send("🤖 BOT STARTED")
@@ -188,7 +191,6 @@ async def worker():
                         result = await check(page, city)
 
                         if result:
-
                             await tg.send(f"""
 🔥 APPOINTMENT FOUND
 
@@ -209,13 +211,32 @@ async def worker():
 
         await browser.close()
 
-# ================= CONTROLLER =================
+# ================= COMMANDS =================
 
 async def handle(text):
 
     global running
 
-    if text == "/startbot":
+    # ADD USER (FIXED)
+    if text.startswith("/add"):
+
+        try:
+            parts = text.split("|")
+
+            if len(parts) != 6:
+                await tg.send("❌ Format: /add|name|nie|phone|email|cities")
+                return
+
+            _, name, nie, phone, email, cities = parts
+
+            add_user(name, nie, phone, email, cities)
+
+            await tg.send("✅ User added")
+
+        except Exception as e:
+            await tg.send(f"❌ ADD ERROR: {e}")
+
+    elif text == "/startbot":
 
         if running:
             await tg.send("⚠️ Already running")
@@ -236,7 +257,7 @@ async def handle(text):
 async def main():
 
     if not TOKEN:
-        print("NO TOKEN")
+        print("❌ TOKEN MISSING")
         return
 
     await tg.init()
