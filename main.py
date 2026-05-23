@@ -9,7 +9,7 @@ from playwright.async_api import async_playwright
 import os
 
 TOKEN = os.getenv("BOT_TOKEN")
-
+ADMIN_ID = 6675176280
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 URL = "https://icp.administracionelectronica.gob.es/icpplus/index.html"
