@@ -6,7 +6,7 @@ from playwright.async_api import async_playwright
 
 # ================= CONFIG =================
 
-TOKEN = os.getenv("8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps")
+BOT_TOKEN = os.getenv("8202293986:AAFDFxfm9O_ZfWWL9p4UAXmeTV7M4fSWtps")
 ADMIN_ID = 6675176280
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
