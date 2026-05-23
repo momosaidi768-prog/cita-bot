@@ -2,7 +2,6 @@ import asyncio
 import sqlite3
 import aiohttp
 import os
-
 from playwright.async_api import async_playwright
 
 # ================= CONFIG =================
@@ -10,16 +9,6 @@ from playwright.async_api import async_playwright
 TOKEN = os.getenv("BOT_TOKEN")
 
 ADMIN_ID = 6675176280
-
-# ===== PROXY =====
-# إذا البروكسي خاسر علق البوت
-# لذلك خلي USE_PROXY=False للتجربة
-
-USE_PROXY = False
-
-PROXY_SERVER = "http://104.207.43.86:3129"
-PROXY_USER = "umtm2swfzlr7"
-PROXY_PASS = "15ngynzfxzl2nsm"
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -36,7 +25,7 @@ class Telegram:
 
     async def init(self):
 
-        if not self.session:
+        if self.session is None:
 
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=120)
@@ -48,24 +37,17 @@ class Telegram:
 
         try:
 
-            async with self.session.post(
+            await self.session.post(
                 f"{TG_URL}/sendMessage",
                 data={
                     "chat_id": ADMIN_ID,
                     "text": str(msg)[:4000]
                 }
-            ) as r:
-
-                if r.status != 200:
-                    print("TG ERROR:", await r.text())
+            )
 
         except Exception as e:
-            print("TG SEND ERROR:", e)
 
-    async def close(self):
-
-        if self.session:
-            await self.session.close()
+            print("TG ERROR:", e)
 
 tg = Telegram()
 
@@ -161,75 +143,43 @@ async def safe_goto(page, url):
 
 # ================= CHECK =================
 
-async def check(context, city):
-
-    page = await context.new_page()
+async def check(page, city):
 
     try:
 
         ok = await safe_goto(page, URL)
 
         if not ok:
-            await page.close()
             return None
 
-        print(f"CHECKING CITY: {city}")
+        print(f"CHECKING: {city}")
 
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(2000)
 
         selects = page.locator("select")
 
         if await selects.count() == 0:
-
-            print("NO SELECT FOUND")
-
-            await page.close()
             return None
 
-        # ===== SELECT CITY =====
+        # ===== CITY =====
 
         try:
 
-            options = await selects.nth(0).locator(
-                "option"
-            ).all_text_contents()
-
-            found = False
-
-            for op in options:
-
-                if city.lower().strip() in op.lower():
-
-                    print("CITY FOUND:", op)
-
-                    await selects.nth(0).select_option(
-                        label=op
-                    )
-
-                    found = True
-                    break
-
-            if not found:
-
-                print("CITY NOT FOUND:", city)
-
-                await page.close()
-                return None
+            await selects.nth(0).select_option(
+                label=city
+            )
 
         except Exception as e:
 
             print("CITY ERROR:", e)
 
-            await page.close()
             return None
 
         # ===== NEXT =====
 
         await page.click("input[type='submit']")
 
-        await page.wait_for_load_state("networkidle")
-
-        await page.wait_for_timeout(2000)
+        await page.wait_for_load_state("load")
 
         # ===== SERVICE =====
 
@@ -237,48 +187,25 @@ async def check(context, city):
 
         try:
 
-            options = await selects.nth(0).locator(
-                "option"
-            ).all_text_contents()
-
-            found = False
-
-            for op in options:
-
-                if SERVICE.lower() in op.lower():
-
-                    print("SERVICE FOUND")
-
-                    await selects.nth(0).select_option(
-                        label=op
-                    )
-
-                    found = True
-                    break
-
-            if not found:
-
-                print("SERVICE NOT FOUND")
-
-                await page.close()
-                return None
+            await selects.nth(0).select_option(
+                label=SERVICE
+            )
 
         except Exception as e:
 
             print("SERVICE ERROR:", e)
 
-            await page.close()
             return None
 
         # ===== NEXT =====
 
         await page.click("input[type='submit']")
 
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_load_state("load")
 
-        await page.wait_for_timeout(3000)
+        html = await page.content()
 
-        html = (await page.content()).lower()
+        html = html.lower()
 
         patterns = [
             "no hay citas",
@@ -288,89 +215,52 @@ async def check(context, city):
 
         if any(p in html for p in patterns):
 
-            print(f"NO APPOINTMENTS IN {city}")
+            print(f"NO SLOTS IN {city}")
 
-            await page.close()
             return None
 
-        print(f"APPOINTMENT FOUND IN {city}")
+        print(f"FOUND APPOINTMENT IN {city}")
 
-        result = page.url
-
-        await page.close()
-
-        return result
+        return page.url
 
     except Exception as e:
 
         print("CHECK ERROR:", e)
-
-        try:
-            await page.close()
-        except:
-            pass
 
         return None
 
 # ================= WORKER =================
 
 running = False
-worker_task = None
 
 async def worker():
 
     global running
 
-    print("WORKER STARTING")
+    print("WORKER STARTED")
 
     async with async_playwright() as p:
 
         print("PLAYWRIGHT STARTED")
 
-        browser_args = {
-            "headless": True,
-            "args": [
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-blink-features=AutomationControlled"
+                "--disable-gpu"
             ]
-        }
-
-        # ===== PROXY =====
-
-        if USE_PROXY:
-
-            browser_args["proxy"] = {
-                "server": PROXY_SERVER,
-                "username": PROXY_USER,
-                "password": PROXY_PASS
-            }
-
-        print("LAUNCHING BROWSER")
-
-        browser = await p.chromium.launch(
-            **browser_args
         )
 
         print("BROWSER STARTED")
 
         context = await browser.new_context(
-            locale="es-ES",
-            viewport={
-                "width": 1366,
-                "height": 768
-            },
-            user_agent=(
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "(KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            )
+            locale="es-ES"
         )
 
-        await tg.send("🤖 BOT STARTED")
+        page = await context.new_page()
+
+        await tg.send("BOT STARTED")
 
         while running:
 
@@ -383,6 +273,7 @@ async def worker():
                     print("NO USERS")
 
                     await asyncio.sleep(10)
+
                     continue
 
                 for user in users:
@@ -398,7 +289,7 @@ async def worker():
                     for city in city_list:
 
                         result = await check(
-                            context,
+                            page,
                             city
                         )
 
@@ -415,15 +306,15 @@ async def worker():
 
                             await asyncio.sleep(60)
 
-                        await asyncio.sleep(5)
+                        await asyncio.sleep(3)
 
-                await asyncio.sleep(15)
+                await asyncio.sleep(10)
 
             except Exception as e:
 
                 print("WORKER LOOP ERROR:", e)
 
-                await asyncio.sleep(10)
+                await asyncio.sleep(5)
 
         await browser.close()
 
@@ -432,7 +323,6 @@ async def worker():
 async def handle(text):
 
     global running
-    global worker_task
 
     # ===== ADD USER =====
 
@@ -465,26 +355,27 @@ async def handle(text):
 
         except Exception as e:
 
-            await tg.send(f"ADD ERROR:\n{e}")
+            await tg.send(f"ADD ERROR: {e}")
 
-    # ===== START =====
+    # ===== START BOT =====
 
     elif text == "/startbot":
 
-        if worker_task and not worker_task.done():
+        if running:
 
-            await tg.send("BOT ALREADY RUNNING")
+            await tg.send("ALREADY RUNNING")
+
             return
 
         running = True
 
-        worker_task = asyncio.create_task(
+        asyncio.create_task(
             worker()
         )
 
-        await tg.send("STARTING BOT")
+        await tg.send("BOT STARTING")
 
-    # ===== STOP =====
+    # ===== STOP BOT =====
 
     elif text == "/stopbot":
 
@@ -499,68 +390,62 @@ async def main():
     if not TOKEN:
 
         print("TOKEN MISSING")
+
         return
 
-    print("BOT STARTING")
+    print("BOT ONLINE")
 
     await tg.init()
 
     await tg.send("BOT ONLINE")
 
-    offset = 0
+    offset = None
 
-    async with aiohttp.ClientSession(
-        timeout=aiohttp.ClientTimeout(total=60)
-    ) as s:
+    while True:
 
-        while True:
+        try:
 
-            try:
+            async with aiohttp.ClientSession() as s:
 
                 async with s.get(
                     f"{TG_URL}/getUpdates",
                     params={
                         "offset": offset,
                         "timeout": 30
-                    }
+                    },
+                    timeout=60
                 ) as r:
 
                     data = await r.json()
 
-                for upd in data.get("result", []):
+            for upd in data.get("result", []):
 
-                    offset = upd["update_id"] + 1
+                offset = upd["update_id"] + 1
 
-                    if "message" not in upd:
-                        continue
+                if "message" not in upd:
+                    continue
 
-                    chat_id = upd["message"]["chat"]["id"]
+                chat_id = upd["message"]["chat"]["id"]
 
-                    text = upd["message"].get(
-                        "text",
-                        ""
-                    )
+                text = upd["message"].get(
+                    "text",
+                    ""
+                )
 
-                    print("MESSAGE:", text)
+                print("MESSAGE:", text)
 
-                    if chat_id == ADMIN_ID:
+                if chat_id == ADMIN_ID:
 
-                        await handle(text)
+                    await handle(text)
 
-            except Exception as e:
+        except Exception as e:
 
-                print("MAIN ERROR:", e)
+            print("MAIN ERROR:", e)
 
-            await asyncio.sleep(2)
+        await asyncio.sleep(2)
 
 # ================= START =================
 
 if __name__ == "__main__":
 
-    try:
-
-        asyncio.run(main())
-
-    except KeyboardInterrupt:
-
-        print("STOPPED")
+    asyncio.run(main())
