@@ -2,11 +2,12 @@ import asyncio
 import sqlite3
 import aiohttp
 import os
+
 from playwright.async_api import async_playwright
 
 # ================= CONFIG =================
 
-TOKEN = os.getenv("")
+TOKEN = os.getenv("BOT_TOKEN")
 
 ADMIN_ID = 6675176280
 
@@ -41,13 +42,16 @@ class Telegram:
 
         try:
 
-            await self.session.post(
+            async with self.session.post(
                 f"{TG_URL}/sendMessage",
                 data={
                     "chat_id": ADMIN_ID,
                     "text": str(msg)[:4000]
                 }
-            )
+            ) as r:
+
+                if r.status != 200:
+                    print("TG ERROR:", await r.text())
 
         except Exception as e:
             print("TG ERROR:", e)
@@ -61,7 +65,10 @@ tg = Telegram()
 
 # ================= DATABASE =================
 
-conn = sqlite3.connect("users.db", check_same_thread=False)
+conn = sqlite3.connect(
+    "users.db",
+    check_same_thread=False
+)
 
 cur = conn.cursor()
 
@@ -82,16 +89,33 @@ conn.commit()
 def add_user(name, nie, phone, email, cities):
 
     cur.execute("""
-        INSERT INTO users (name, nie, phone, email, cities)
+        INSERT INTO users (
+            name,
+            nie,
+            phone,
+            email,
+            cities
+        )
         VALUES (?, ?, ?, ?, ?)
-    """, (name, nie, phone, email, cities))
+    """, (
+        name,
+        nie,
+        phone,
+        email,
+        cities
+    ))
 
     conn.commit()
 
 def get_users():
 
     cur.execute("""
-        SELECT name, nie, phone, email, cities
+        SELECT
+            name,
+            nie,
+            phone,
+            email,
+            cities
         FROM users
         WHERE active=1
     """)
@@ -116,7 +140,6 @@ async def safe_goto(page, url):
 
             await page.wait_for_selector(
                 "select",
-                state="visible",
                 timeout=30000
             )
 
@@ -132,43 +155,122 @@ async def safe_goto(page, url):
 
 # ================= CHECK =================
 
-async def check(page, city):
+async def check(context, city):
+
+    page = await context.new_page()
 
     try:
 
         ok = await safe_goto(page, URL)
 
         if not ok:
+            await page.close()
             return None
 
         print(f"📍 Checking: {city}")
 
+        await page.wait_for_timeout(3000)
+
+        selects = page.locator("select")
+
+        count = await selects.count()
+
+        if count == 0:
+
+            print("❌ No select found")
+
+            await page.close()
+            return None
+
+        # ================= CITY =================
+
+        try:
+
+            options = await selects.nth(0).locator(
+                "option"
+            ).all_text_contents()
+
+            print("AVAILABLE CITIES:", options)
+
+            found = False
+
+            for op in options:
+
+                if city.lower().strip() in op.lower():
+
+                    await selects.nth(0).select_option(
+                        label=op
+                    )
+
+                    found = True
+                    break
+
+            if not found:
+
+                print(f"❌ City not found: {city}")
+
+                await page.close()
+                return None
+
+        except Exception as e:
+
+            print("CITY ERROR:", e)
+
+            await page.close()
+            return None
+
+        # NEXT
+
+        await page.click("input[type='submit']")
+
+        await page.wait_for_load_state("networkidle")
+
         await page.wait_for_timeout(2000)
 
+        # ================= SERVICE =================
+
         selects = page.locator("select")
 
-        if await selects.count() == 0:
+        try:
+
+            options = await selects.nth(0).locator(
+                "option"
+            ).all_text_contents()
+
+            found = False
+
+            for op in options:
+
+                if SERVICE.lower() in op.lower():
+
+                    await selects.nth(0).select_option(
+                        label=op
+                    )
+
+                    found = True
+                    break
+
+            if not found:
+
+                print("❌ SERVICE NOT FOUND")
+
+                await page.close()
+                return None
+
+        except Exception as e:
+
+            print("SERVICE ERROR:", e)
+
+            await page.close()
             return None
 
-        try:
-            await selects.nth(0).select_option(label=city)
-        except:
-            return None
+        # NEXT
 
         await page.click("input[type='submit']")
 
         await page.wait_for_load_state("networkidle")
 
-        selects = page.locator("select")
-
-        try:
-            await selects.nth(0).select_option(label=SERVICE)
-        except:
-            return None
-
-        await page.click("input[type='submit']")
-
-        await page.wait_for_load_state("networkidle")
+        await page.wait_for_timeout(3000)
 
         html = (await page.content()).lower()
 
@@ -182,15 +284,25 @@ async def check(page, city):
 
             print(f"❌ No slots in {city}")
 
+            await page.close()
             return None
 
         print(f"🔥 FOUND in {city}")
 
-        return page.url
+        current_url = page.url
+
+        await page.close()
+
+        return current_url
 
     except Exception as e:
 
         print("CHECK ERROR:", e)
+
+        try:
+            await page.close()
+        except:
+            pass
 
         return None
 
@@ -217,15 +329,25 @@ async def worker():
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
                 "--disable-gpu"
             ]
         )
 
         context = await browser.new_context(
-            locale="es-ES"
+            locale="es-ES",
+            viewport={
+                "width": 1366,
+                "height": 768
+            },
+            user_agent=(
+                "Mozilla/5.0 "
+                "(Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 "
+                "(KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            )
         )
-
-        page = await context.new_page()
 
         await tg.send("🤖 BOT STARTED")
 
@@ -240,7 +362,6 @@ async def worker():
                     print("⚠️ No users")
 
                     await asyncio.sleep(10)
-
                     continue
 
                 for user in users:
@@ -250,11 +371,15 @@ async def worker():
                     city_list = [
                         c.strip()
                         for c in cities.split(",")
+                        if c.strip()
                     ]
 
                     for city in city_list:
 
-                        result = await check(page, city)
+                        result = await check(
+                            context,
+                            city
+                        )
 
                         if result:
 
@@ -263,20 +388,21 @@ async def worker():
 
 👤 {name}
 📍 {city}
+
 🔗 {result}
 """)
 
                             await asyncio.sleep(60)
 
-                        await asyncio.sleep(3)
+                        await asyncio.sleep(5)
 
-                await asyncio.sleep(10)
+                await asyncio.sleep(15)
 
             except Exception as e:
 
                 print("WORKER LOOP ERROR:", e)
 
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)
 
         await browser.close()
 
@@ -287,7 +413,8 @@ async def handle(text):
     global running
     global worker_task
 
-    # ADD USER
+    # ================= ADD USER =================
+
     if text.startswith("/add"):
 
         try:
@@ -297,7 +424,8 @@ async def handle(text):
             if len(parts) != 6:
 
                 await tg.send(
-                    "❌ Format:\n/add|name|nie|phone|email|cities"
+                    "❌ FORMAT:\n"
+                    "/add|name|nie|phone|email|cities"
                 )
 
                 return
@@ -312,31 +440,36 @@ async def handle(text):
                 cities
             )
 
-            await tg.send("✅ User added")
+            await tg.send("✅ USER ADDED")
 
         except Exception as e:
 
-            await tg.send(f"❌ ADD ERROR: {e}")
+            await tg.send(f"❌ ADD ERROR:\n{e}")
+
+    # ================= START BOT =================
 
     elif text == "/startbot":
 
         if worker_task and not worker_task.done():
 
-            await tg.send("⚠️ Already running")
-
+            await tg.send("⚠️ ALREADY RUNNING")
             return
 
         running = True
 
-        worker_task = asyncio.create_task(worker())
+        worker_task = asyncio.create_task(
+            worker()
+        )
 
         await tg.send("🚀 BOT STARTED")
+
+    # ================= STOP BOT =================
 
     elif text == "/stopbot":
 
         running = False
 
-        await tg.send("⛔ STOPPED")
+        await tg.send("⛔ BOT STOPPED")
 
 # ================= MAIN =================
 
@@ -345,7 +478,6 @@ async def main():
     if not TOKEN:
 
         print("❌ TOKEN MISSING")
-
         return
 
     await tg.init()
@@ -364,7 +496,10 @@ async def main():
 
                 async with s.get(
                     f"{TG_URL}/getUpdates",
-                    params={"offset": offset},
+                    params={
+                        "offset": offset,
+                        "timeout": 30
+                    }
                 ) as r:
 
                     data = await r.json()
@@ -378,7 +513,12 @@ async def main():
 
                     chat_id = upd["message"]["chat"]["id"]
 
-                    text = upd["message"].get("text", "")
+                    text = upd["message"].get(
+                        "text",
+                        ""
+                    )
+
+                    print("MESSAGE:", text)
 
                     if chat_id == ADMIN_ID:
 
@@ -390,10 +530,14 @@ async def main():
 
             await asyncio.sleep(2)
 
+# ================= START =================
+
 if __name__ == "__main__":
 
     try:
+
         asyncio.run(main())
 
     except KeyboardInterrupt:
-        print("STOPPED")
+
+        print("⛔ STOPPED")
