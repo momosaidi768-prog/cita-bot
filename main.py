@@ -8,6 +8,9 @@ from playwright.async_api import async_playwright
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 6675176280
+PROXY_SERVER = "http://104.207.43.86:3129"
+PROXY_USER = "umtm2swfzlr7"
+PROXY_PASS = "15ngynzfxzl2nsm"
 
 TG_URL = f"https://api.telegram.org/bot{TOKEN}"
 
