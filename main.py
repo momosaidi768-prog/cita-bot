@@ -15,6 +15,7 @@ SERVICE = "POLICÍA - TOMA DE HUELLAS (EXPEDICIÓN DE TARJETA)"
 
 running = False
 worker_task = None
+bot_started = False
 
 # ================= TELEGRAM =================
 
@@ -23,24 +24,19 @@ class Telegram:
         self.session = None
 
     async def init(self):
-        if self.session is None:
+        if not self.session:
             self.session = aiohttp.ClientSession()
 
     async def send(self, msg):
         await self.init()
 
-        msg = str(msg)
-
-        if len(msg) > 3500:
-            msg = msg[:3500]
-
         try:
             await self.session.post(
                 f"{TG_URL}/sendMessage",
-                data={"chat_id": ADMIN_ID, "text": msg}
+                data={"chat_id": ADMIN_ID, "text": str(msg)[:3500]}
             )
-        except Exception as e:
-            print("TG ERROR:", e)
+        except:
+            pass
 
 tg = Telegram()
 
@@ -71,7 +67,7 @@ def get_users():
     """)
     return cur.fetchall()
 
-# ================= SAFE NAV =================
+# ================= NAV SAFE =================
 
 async def safe_goto(page, url):
     for _ in range(3):
@@ -85,9 +81,9 @@ async def safe_goto(page, url):
 # ================= CHECK =================
 
 async def check(page, city):
+
     try:
-        ok = await safe_goto(page, URL)
-        if not ok:
+        if not await safe_goto(page, URL):
             return None
 
         selects = page.locator("select")
@@ -95,31 +91,39 @@ async def check(page, city):
         if await selects.count() < 2:
             return None
 
-        await selects.nth(0).select_option(label=city)
+        # select city
+        try:
+            await selects.nth(0).select_option(label=city)
+        except:
+            return None
+
         await page.click("input[type='submit']")
         await page.wait_for_load_state("domcontentloaded")
 
-        await selects.nth(0).select_option(label=SERVICE)
+        # select service
+        try:
+            await selects.nth(0).select_option(label=SERVICE)
+        except:
+            return None
+
         await page.click("input[type='submit']")
         await page.wait_for_load_state("domcontentloaded")
 
         html = await page.content()
 
+        # detection logic
         if "no hay citas" in html.lower():
             return None
 
         return page.url
 
-    except Exception as e:
-        print("CHECK ERROR:", e)
+    except:
         return None
 
 # ================= WORKER =================
 
 async def worker():
-    global running
-
-    print("🚀 WORKER STARTED")
+    global running, bot_started
 
     try:
         async with async_playwright() as p:
@@ -133,10 +137,11 @@ async def worker():
                 ]
             )
 
-            context = await browser.new_context()
-            page = await context.new_page()
+            page = await browser.new_page()
 
-            await tg.send("🤖 Bot started")
+            if not bot_started:
+                await tg.send("🤖 Bot started")
+                bot_started = True
 
             while running:
 
@@ -152,10 +157,8 @@ async def worker():
                         result = await check(page, city)
 
                         if result:
-                            await page.screenshot(path="shot.png")
-
                             await tg.send(
-                                f"🔥 FOUND\n{name}\n{nie}\n{city}\n{result}"
+                                f"🔥 APPOINTMENT FOUND\n{name}\n{city}\n{result}"
                             )
 
                             await asyncio.sleep(30)
@@ -177,12 +180,12 @@ async def handle(text):
     if text == "/startbot":
 
         if running:
-            return  # ❌ يمنع spam
+            return
 
         running = True
         worker_task = asyncio.create_task(worker())
 
-        await tg.send("🚀 Bot started")
+        await tg.send("🚀 Started")
 
     elif text == "/stopbot":
 
@@ -194,9 +197,9 @@ async def handle(text):
         if worker_task:
             worker_task.cancel()
 
-        await tg.send("⛔ Bot stopped")
+        await tg.send("⛔ Stopped")
 
-# ================= MAIN LOOP =================
+# ================= MAIN =================
 
 async def main():
 
@@ -229,8 +232,6 @@ async def main():
             print("MAIN ERROR:", e)
 
         await asyncio.sleep(2)
-
-# ================= START =================
 
 if __name__ == "__main__":
     asyncio.run(main())
