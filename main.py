@@ -9,7 +9,7 @@ from playwright.async_api import async_playwright
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-ADMIN_ID = int(os.getenv("ADMIN_ID", "6675176280"))
+ADMIN_ID = 6675176280
 
 # ===== PROXY =====
 # إذا البروكسي خاسر علق البوت
