@@ -9,7 +9,13 @@ from playwright.async_api import async_playwright
 
 TOKEN = os.getenv("BOT_TOKEN")
 
-ADMIN_ID = 6675176280
+ADMIN_ID = int(os.getenv("ADMIN_ID", "6675176280"))
+
+# ===== PROXY =====
+# إذا البروكسي خاسر علق البوت
+# لذلك خلي USE_PROXY=False للتجربة
+
+USE_PROXY = False
 
 PROXY_SERVER = "http://104.207.43.86:3129"
 PROXY_USER = "umtm2swfzlr7"
@@ -30,7 +36,7 @@ class Telegram:
 
     async def init(self):
 
-        if self.session is None:
+        if not self.session:
 
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=120)
@@ -54,7 +60,7 @@ class Telegram:
                     print("TG ERROR:", await r.text())
 
         except Exception as e:
-            print("TG ERROR:", e)
+            print("TG SEND ERROR:", e)
 
     async def close(self):
 
@@ -130,7 +136,7 @@ async def safe_goto(page, url):
 
         try:
 
-            print(f"🌐 GOTO attempt {i+1}")
+            print(f"GOTO ATTEMPT {i+1}")
 
             await page.goto(
                 url,
@@ -167,22 +173,20 @@ async def check(context, city):
             await page.close()
             return None
 
-        print(f"📍 Checking: {city}")
+        print(f"CHECKING CITY: {city}")
 
         await page.wait_for_timeout(3000)
 
         selects = page.locator("select")
 
-        count = await selects.count()
+        if await selects.count() == 0:
 
-        if count == 0:
-
-            print("❌ No select found")
+            print("NO SELECT FOUND")
 
             await page.close()
             return None
 
-        # ================= CITY =================
+        # ===== SELECT CITY =====
 
         try:
 
@@ -190,13 +194,13 @@ async def check(context, city):
                 "option"
             ).all_text_contents()
 
-            print("AVAILABLE CITIES:", options)
-
             found = False
 
             for op in options:
 
                 if city.lower().strip() in op.lower():
+
+                    print("CITY FOUND:", op)
 
                     await selects.nth(0).select_option(
                         label=op
@@ -207,7 +211,7 @@ async def check(context, city):
 
             if not found:
 
-                print(f"❌ City not found: {city}")
+                print("CITY NOT FOUND:", city)
 
                 await page.close()
                 return None
@@ -219,7 +223,7 @@ async def check(context, city):
             await page.close()
             return None
 
-        # NEXT
+        # ===== NEXT =====
 
         await page.click("input[type='submit']")
 
@@ -227,7 +231,7 @@ async def check(context, city):
 
         await page.wait_for_timeout(2000)
 
-        # ================= SERVICE =================
+        # ===== SERVICE =====
 
         selects = page.locator("select")
 
@@ -243,6 +247,8 @@ async def check(context, city):
 
                 if SERVICE.lower() in op.lower():
 
+                    print("SERVICE FOUND")
+
                     await selects.nth(0).select_option(
                         label=op
                     )
@@ -252,7 +258,7 @@ async def check(context, city):
 
             if not found:
 
-                print("❌ SERVICE NOT FOUND")
+                print("SERVICE NOT FOUND")
 
                 await page.close()
                 return None
@@ -264,7 +270,7 @@ async def check(context, city):
             await page.close()
             return None
 
-        # NEXT
+        # ===== NEXT =====
 
         await page.click("input[type='submit']")
 
@@ -282,18 +288,18 @@ async def check(context, city):
 
         if any(p in html for p in patterns):
 
-            print(f"❌ No slots in {city}")
+            print(f"NO APPOINTMENTS IN {city}")
 
             await page.close()
             return None
 
-        print(f"🔥 FOUND in {city}")
+        print(f"APPOINTMENT FOUND IN {city}")
 
-        current_url = page.url
+        result = page.url
 
         await page.close()
 
-        return current_url
+        return result
 
     except Exception as e:
 
@@ -315,24 +321,39 @@ async def worker():
 
     global running
 
-    print("🚀 WORKER STARTED")
+    print("WORKER STARTING")
 
     async with async_playwright() as p:
 
-        browser = await p.chromium.launch(
-            headless=True,
-            proxy={
+        print("PLAYWRIGHT STARTED")
+
+        browser_args = {
+            "headless": True,
+            "args": [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-blink-features=AutomationControlled"
+            ]
+        }
+
+        # ===== PROXY =====
+
+        if USE_PROXY:
+
+            browser_args["proxy"] = {
                 "server": PROXY_SERVER,
                 "username": PROXY_USER,
                 "password": PROXY_PASS
-            },
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-gpu"
-            ]
+            }
+
+        print("LAUNCHING BROWSER")
+
+        browser = await p.chromium.launch(
+            **browser_args
         )
+
+        print("BROWSER STARTED")
 
         context = await browser.new_context(
             locale="es-ES",
@@ -359,7 +380,7 @@ async def worker():
 
                 if not users:
 
-                    print("⚠️ No users")
+                    print("NO USERS")
 
                     await asyncio.sleep(10)
                     continue
@@ -413,7 +434,7 @@ async def handle(text):
     global running
     global worker_task
 
-    # ================= ADD USER =================
+    # ===== ADD USER =====
 
     if text.startswith("/add"):
 
@@ -424,7 +445,7 @@ async def handle(text):
             if len(parts) != 6:
 
                 await tg.send(
-                    "❌ FORMAT:\n"
+                    "FORMAT:\n"
                     "/add|name|nie|phone|email|cities"
                 )
 
@@ -440,19 +461,19 @@ async def handle(text):
                 cities
             )
 
-            await tg.send("✅ USER ADDED")
+            await tg.send("USER ADDED")
 
         except Exception as e:
 
-            await tg.send(f"❌ ADD ERROR:\n{e}")
+            await tg.send(f"ADD ERROR:\n{e}")
 
-    # ================= START BOT =================
+    # ===== START =====
 
     elif text == "/startbot":
 
         if worker_task and not worker_task.done():
 
-            await tg.send("⚠️ ALREADY RUNNING")
+            await tg.send("BOT ALREADY RUNNING")
             return
 
         running = True
@@ -461,15 +482,15 @@ async def handle(text):
             worker()
         )
 
-        await tg.send("🚀 BOT STARTED")
+        await tg.send("STARTING BOT")
 
-    # ================= STOP BOT =================
+    # ===== STOP =====
 
     elif text == "/stopbot":
 
         running = False
 
-        await tg.send("⛔ BOT STOPPED")
+        await tg.send("BOT STOPPED")
 
 # ================= MAIN =================
 
@@ -477,12 +498,14 @@ async def main():
 
     if not TOKEN:
 
-        print("❌ TOKEN MISSING")
+        print("TOKEN MISSING")
         return
+
+    print("BOT STARTING")
 
     await tg.init()
 
-    await tg.send("🤖 BOT ONLINE")
+    await tg.send("BOT ONLINE")
 
     offset = 0
 
@@ -540,4 +563,4 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
 
-        print("⛔ STOPPED")
+        print("STOPPED")
