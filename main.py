@@ -24,24 +24,20 @@ class Telegram:
 
     async def init(self):
         if self.session is None:
-            timeout = aiohttp.ClientTimeout(total=120)
-            self.session = aiohttp.ClientSession(timeout=timeout)
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=120)
+            )
 
     async def send(self, msg):
         await self.init()
-
         try:
             async with self.session.post(
                 f"{TG_URL}/sendMessage",
-                data={
-                    "chat_id": ADMIN_ID,
-                    "text": str(msg)[:4000]
-                }
+                data={"chat_id": ADMIN_ID, "text": str(msg)[:4000]}
             ) as r:
                 await r.text()
-
         except Exception as e:
-            print("SEND ERROR:", e)
+            print("TELEGRAM ERROR:", e)
 
 tg = Telegram()
 
@@ -79,21 +75,25 @@ def get_users():
     """)
     return cur.fetchall()
 
-# ================= SAFE GOTO =================
+# ================= SAFE NAVIGATION =================
 
 async def safe_goto(page, url):
 
-    for attempt in range(5):
+    for i in range(5):
 
         try:
+            print(f"🌐 GOTO attempt {i+1}")
+
             response = await page.goto(
                 url,
-                wait_until="domcontentloaded",
-                timeout=60000
+                timeout=120000,
+                wait_until="domcontentloaded"
             )
 
             if response is None:
                 raise Exception("No response")
+
+            await page.wait_for_selector("select", timeout=30000)
 
             return True
 
@@ -101,8 +101,8 @@ async def safe_goto(page, url):
 
             err = str(e)
 
-            if "ERR_CONNECTION_TIMED_OUT" in err:
-                print("🌐 TIMEOUT (network or server delay)")
+            if "TIMEOUT" in err or "ERR_CONNECTION_TIMED_OUT" in err:
+                print("🌐 NETWORK BLOCKED / TIMEOUT")
             else:
                 print("GOTO ERROR:", err)
 
@@ -133,8 +133,7 @@ async def check(page, city):
         # CITY
         try:
             await selects.nth(0).select_option(label=city)
-        except Exception as e:
-            print("CITY ERROR:", e)
+        except:
             return None
 
         await page.click("input[type='submit']")
@@ -145,8 +144,7 @@ async def check(page, city):
 
         try:
             await selects.nth(0).select_option(label=SERVICE)
-        except Exception as e:
-            print("SERVICE ERROR:", e)
+        except:
             return None
 
         await page.click("input[type='submit']")
@@ -187,8 +185,7 @@ async def worker():
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--disable-blink-features=AutomationControlled"
+                    "--disable-gpu"
                 ]
             )
 
@@ -212,37 +209,35 @@ async def worker():
                 users = get_users()
 
                 if not users:
-                    print("⚠️ No users")
+                    print("⚠️ No users in DB")
                     await asyncio.sleep(10)
                     continue
 
                 for user in users:
 
-                    try:
+                    name, nie, phone, email, cities = user
+                    city_list = [c.strip() for c in cities.split(",")]
 
-                        name, nie, phone, email, cities = user
-                        city_list = [c.strip() for c in cities.split(",")]
+                    for city in city_list:
 
-                        for city in city_list:
+                        result = await check(page, city)
 
-                            result = await check(page, city)
+                        if result:
 
-                            if result:
+                            try:
 
-                                try:
+                                await page.screenshot(
+                                    path="shot.png",
+                                    full_page=True
+                                )
 
-                                    await page.screenshot(
-                                        path="shot.png",
-                                        full_page=True
-                                    )
+                                form = aiohttp.FormData()
 
-                                    form = aiohttp.FormData()
+                                form.add_field("chat_id", str(ADMIN_ID))
 
-                                    form.add_field("chat_id", str(ADMIN_ID))
-
-                                    form.add_field(
-                                        "caption",
-                                        f"""
+                                form.add_field(
+                                    "caption",
+                                    f"""
 🔥 APPOINTMENT FOUND
 
 👤 {name}
@@ -253,36 +248,27 @@ async def worker():
 
 🔗 {result}
 """
-                                    )
+                                )
 
-                                    form.add_field(
-                                        "photo",
-                                        open("shot.png", "rb"),
-                                        filename="shot.png",
-                                        content_type="image/png"
-                                    )
+                                form.add_field(
+                                    "photo",
+                                    open("shot.png", "rb"),
+                                    filename="shot.png",
+                                    content_type="image/png"
+                                )
 
-                                    await tg.session.post(
-                                        f"{TG_URL}/sendPhoto",
-                                        data=form
-                                    )
+                                await tg.session.post(
+                                    f"{TG_URL}/sendPhoto",
+                                    data=form
+                                )
 
-                                    print("📸 Screenshot sent")
+                            except Exception as e:
+                                print("PHOTO ERROR:", e)
+                                await tg.send(f"🔥 FOUND\n📍 {city}\n🔗 {result}")
 
-                                except Exception as e:
-                                    print("PHOTO ERROR:", e)
-                                    await tg.send(f"🔥 APPOINTMENT FOUND\n📍 {city}\n🔗 {result}")
+                            await asyncio.sleep(60)
 
-                                await asyncio.sleep(60)
-
-                            await asyncio.sleep(3)
-
-                    except Exception as e:
-                        print("USER ERROR:", e)
-
-                await asyncio.sleep(10)
-
-            await browser.close()
+                        await asyncio.sleep(3)
 
     except Exception as e:
         print("WORKER ERROR:", e)
@@ -292,15 +278,14 @@ async def worker():
 
 async def handle(text):
 
-    global running
-    global worker_task
+    global running, worker_task
 
     if text.startswith("/add"):
 
         parts = text.split("|")
 
         if len(parts) != 6:
-            await tg.send("❌ Format:\n/add|name|nie|phone|email|cities")
+            await tg.send("❌ /add|name|nie|phone|email|cities")
             return
 
         _, name, nie, phone, email, cities = parts
@@ -311,13 +296,13 @@ async def handle(text):
     elif text == "/startbot":
 
         if running:
-            await tg.send("⚠️ Bot already running")
+            await tg.send("⚠️ already running")
             return
 
         running = True
         worker_task = asyncio.create_task(worker())
 
-        await tg.send("🚀 Bot started")
+        await tg.send("🚀 bot started")
 
     elif text == "/stopbot":
 
@@ -326,21 +311,20 @@ async def handle(text):
         if worker_task:
             worker_task.cancel()
 
-        await tg.send("⛔ Bot stopped")
+        await tg.send("⛔ stopped")
 
     elif text == "/users":
 
         users = get_users()
 
         if not users:
-            await tg.send("⚠️ No users")
+            await tg.send("⚠️ no users")
             return
 
         msg = "👥 USERS:\n\n"
 
-        for user in users:
-            name, nie, phone, email, cities = user
-            msg += f"👤 {name}\n📍 {cities}\n\n"
+        for u in users:
+            msg += f"👤 {u[0]}\n📍 {u[4]}\n\n"
 
         await tg.send(msg)
 
@@ -351,7 +335,7 @@ async def main():
     print("🔥 BOT STARTING...")
 
     if not TOKEN:
-        print("❌ BOT TOKEN NOT FOUND")
+        print("❌ NO TOKEN")
         return
 
     await tg.init()
@@ -369,7 +353,6 @@ async def main():
                     f"{TG_URL}/getUpdates?offset={offset}",
                     timeout=120
                 ) as r:
-
                     data = await r.json()
 
             for upd in data.get("result", []):
@@ -385,11 +368,9 @@ async def main():
                         await handle(text)
 
         except Exception as e:
-            print("MAIN LOOP ERROR:", e)
+            print("MAIN ERROR:", e)
 
         await asyncio.sleep(2)
-
-# ================= START =================
 
 if __name__ == "__main__":
     asyncio.run(main())
