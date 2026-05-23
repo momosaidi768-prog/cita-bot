@@ -23,13 +23,11 @@ class Telegram:
         self.session = None
 
     async def init(self):
-
         if self.session is None:
             timeout = aiohttp.ClientTimeout(total=120)
             self.session = aiohttp.ClientSession(timeout=timeout)
 
     async def send(self, msg):
-
         await self.init()
 
         try:
@@ -81,7 +79,7 @@ def get_users():
     """)
     return cur.fetchall()
 
-# ================= SAFE GOTO (FIXED) =================
+# ================= SAFE GOTO =================
 
 async def safe_goto(page, url):
 
@@ -90,7 +88,7 @@ async def safe_goto(page, url):
         try:
             response = await page.goto(
                 url,
-                wait_until="commit",
+                wait_until="domcontentloaded",
                 timeout=60000
             )
 
@@ -104,7 +102,7 @@ async def safe_goto(page, url):
             err = str(e)
 
             if "ERR_CONNECTION_TIMED_OUT" in err:
-                print("🌐 NETWORK BLOCKED / TIMEOUT (likely IP issue)")
+                print("🌐 TIMEOUT (network or server delay)")
             else:
                 print("GOTO ERROR:", err)
 
@@ -132,7 +130,7 @@ async def check(page, city):
         if await selects.count() < 1:
             return None
 
-        # STEP 1 CITY
+        # CITY
         try:
             await selects.nth(0).select_option(label=city)
         except Exception as e:
@@ -142,7 +140,7 @@ async def check(page, city):
         await page.click("input[type='submit']")
         await page.wait_for_load_state("load")
 
-        # STEP 2 SERVICE
+        # SERVICE
         selects = page.locator("select")
 
         try:
@@ -194,7 +192,17 @@ async def worker():
                 ]
             )
 
-            context = await browser.new_context()
+            context = await browser.new_context(
+                locale="es-ES",
+                viewport={"width": 1280, "height": 720}
+            )
+
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+
             page = await context.new_page()
 
             await tg.send("🤖 Bot started")
@@ -262,9 +270,7 @@ async def worker():
                                     print("📸 Screenshot sent")
 
                                 except Exception as e:
-
                                     print("PHOTO ERROR:", e)
-
                                     await tg.send(f"🔥 APPOINTMENT FOUND\n📍 {city}\n🔗 {result}")
 
                                 await asyncio.sleep(60)
